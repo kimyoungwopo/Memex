@@ -14,24 +14,24 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "~/*": [
-        "./src/*"
-      ]
-    }
+      "~/*": ["./src/*"]
+    },
+    "types": ["chrome"]
   },
   "include": [
-    ".plasmo/index.d.ts",
     "src/**/*",
-    "*.ts"
+    "*.ts",
+    "*.config.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "dist"
   ]
 }

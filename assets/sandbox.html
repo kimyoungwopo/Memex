@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Memex Embedding Sandbox</title>
+  </head>
+  <body>
+    <script type="module">
+      /**
+       * Sandbox Document - Transformers.js 임베딩 워커
+       * ESM 방식으로 CDN에서 로드
+       */
+
+      // 모델 설정
+      const MODEL_NAME = 'Xenova/all-MiniLM-L6-v2';
+      const EMBEDDING_DIMENSION = 384;
+      const CHUNK_SIZE = 500;
+      const CHUNK_OVERLAP = 50;
+
+      // 상태 변수
+      let transformersModule = null;
+      let embeddingPipeline = null;
+      let isLoading = false;
+      let loadError = null;
+
+      /**
+       * 파이프라인 초기화
+       */
+      async function initPipeline() {
+        if (embeddingPipeline) return true;
+        if (isLoading) return false;
+
+        isLoading = true;
+        loadError = null;
+
+        try {
+          console.log('[Sandbox] Loading Transformers.js from CDN...');
+
+          // ESM으로 Transformers.js 로드
+          transformersModule = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js');
+
+          console.log('[Sandbox] Transformers.js loaded:', Object.keys(transformersModule));
+
+          // 환경 설정 - sandbox에서는 cache 사용 불가
+          if (transformersModule.env) {
+            transformersModule.env.allowLocalModels = false;
+            transformersModule.env.useBrowserCache = false;  // sandbox는 cache API 접근 불가
+            transformersModule.env.useCache = false;
+          }
+
+          console.log('[Sandbox] Loading embedding model:', MODEL_NAME);
+
+          embeddingPipeline = await transformersModule.pipeline('feature-extraction', MODEL_NAME, {
+            progress_callback: (progress) => {
+              if (progress.status === 'progress' && progress.progress) {
+                console.log('[Sandbox] Model loading: ' + Math.round(progress.progress) + '%');
+                window.parent.postMessage({
+                  type: 'EMBEDDING_PROGRESS',
+                  progress: progress.progress
+                }, '*');
+              }
+            },
+          });
+
+          console.log('[Sandbox] Embedding model loaded successfully!');
+          isLoading = false;
+          return true;
+        } catch (error) {
+          console.error('[Sandbox] Failed to load:', error);
+          loadError = error.message || 'Unknown error';
+          isLoading = false;
+          return false;
+        }
+      }
+
+      /**
+       * 텍스트를 벡터로 변환
+       */
+      async function generateEmbedding(text) {
+        if (!embeddingPipeline) {
+          throw new Error('Embedding pipeline not initialized');
+        }
+
+        const normalizedText = text.replace(/\s+/g, ' ').trim().slice(0, 512);
+
+        const output = await embeddingPipeline(normalizedText, {
+          pooling: 'mean',
+          normalize: true,
+        });
+
+        return Array.from(output.data);
+      }
+
+      /**
+       * 텍스트 청킹
+       */
+      function chunkText(text) {
+        const chunks = [];
+        const sentences = text.split(/(?<=[.!?。])\s+/);
+        let currentChunk = '';
+
+        for (const sentence of sentences) {
+          if ((currentChunk + sentence).length <= CHUNK_SIZE) {
+            currentChunk += (currentChunk ? ' ' : '') + sentence;
+          } else {
+            if (currentChunk) chunks.push(currentChunk);
+            const words = currentChunk.split(' ');
+            const overlapWords = words.slice(-Math.ceil(CHUNK_OVERLAP / 5));
+            currentChunk = overlapWords.join(' ') + ' ' + sentence;
+          }
+        }
+
+        if (currentChunk.trim()) chunks.push(currentChunk.trim());
+        if (chunks.length === 0 && text.trim()) chunks.push(text.slice(0, CHUNK_SIZE));
+
+        return chunks;
+      }
+
+      /**
+       * 임베딩 평균 계산
+       */
+      function averageEmbeddings(embeddings) {
+        if (embeddings.length === 0) return new Array(EMBEDDING_DIMENSION).fill(0);
+        if (embeddings.length === 1) return embeddings[0];
+
+        const avgEmbedding = new Array(EMBEDDING_DIMENSION).fill(0);
+        for (const emb of embeddings) {
+          for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
+            avgEmbedding[i] += emb[i];
+          }
+        }
+        for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
+          avgEmbedding[i] /= embeddings.length;
+        }
+
+        const norm = Math.sqrt(avgEmbedding.reduce((sum, val) => sum + val * val, 0));
+        if (norm > 0) {
+          for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
+            avgEmbedding[i] /= norm;
+          }
+        }
+
+        return avgEmbedding;
+      }
+
+      /**
+       * 메시지 핸들러
+       */
+      async function handleMessage(data) {
+        const { type, id } = data;
+
+        console.log('[Sandbox] Handling message:', type);
+
+        try {
+          switch (type) {
+            case 'INIT_EMBEDDING': {
+              const success = await initPipeline();
+              return {
+                id,
+                success: true,
+                status: success ? 'ready' : (loadError ? 'error' : 'loading'),
+                error: loadError || undefined,
+              };
+            }
+
+            case 'GET_STATUS': {
+              if (embeddingPipeline) return { id, success: true, status: 'ready' };
+              if (isLoading) return { id, success: true, status: 'loading' };
+              if (loadError) return { id, success: true, status: 'error', error: loadError };
+              return { id, success: true, status: 'idle' };
+            }
+
+            case 'GENERATE_EMBEDDING': {
+              if (!embeddingPipeline) await initPipeline();
+              if (!embeddingPipeline) return { id, success: false, error: loadError || 'Model not loaded' };
+
+              const embedding = await generateEmbedding(data.text);
+              return { id, success: true, embedding };
+            }
+
+            case 'GENERATE_DOCUMENT_EMBEDDING': {
+              if (!embeddingPipeline) await initPipeline();
+              if (!embeddingPipeline) return { id, success: false, error: loadError || 'Model not loaded' };
+
+              const chunks = chunkText(data.content);
+              console.log('[Sandbox] Processing ' + chunks.length + ' chunks');
+
+              const embeddings = [];
+              for (const chunk of chunks) {
+                const embedding = await generateEmbedding(chunk);
+                embeddings.push(embedding);
+              }
+
+              const avgEmbedding = averageEmbeddings(embeddings);
+              return { id, success: true, embedding: avgEmbedding };
+            }
+
+            default:
+              return { id, success: false, error: 'Unknown message type' };
+          }
+        } catch (error) {
+          console.error('[Sandbox] Error:', error);
+          return { id, success: false, error: error.message || 'Unknown error' };
+        }
+      }
+
+      // 메시지 리스너 등록
+      window.addEventListener('message', async (event) => {
+        if (event.source !== window.parent) return;
+        if (!event.data || !event.data.type) return;
+
+        const response = await handleMessage(event.data);
+        window.parent.postMessage(response, '*');
+      });
+
+      // 준비 완료 알림
+      console.log('[Sandbox] Document ready, sending SANDBOX_READY...');
+      window.parent.postMessage({ type: 'SANDBOX_READY' }, '*');
+
+      // 자동 초기화 시작
+      console.log('[Sandbox] Starting auto-initialization...');
+      initPipeline();
+    </script>
+  </body>
+</html>

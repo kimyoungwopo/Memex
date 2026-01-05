@@ -6,6 +6,7 @@ export interface Message {
   text: string
   timestamp?: number
   isThinking?: boolean
+  image?: string // Base64 data URL
 }
 
 // Chat Session for persistence

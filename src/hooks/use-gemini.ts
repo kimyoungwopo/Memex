@@ -148,7 +148,7 @@ export const useGemini = () => {
 
         console.log("🚀 Creating AI session...")
 
-        // 4. 세션 생성 (최신 API 스펙)
+        // 4. 세션 생성 (최신 API 스펙 - 2026)
         const newSession = await languageModel.create({
           // initialPrompts로 시스템 프롬프트 설정
           initialPrompts: [
@@ -159,6 +159,11 @@ export const useGemini = () => {
                 "사용자의 질문에 대해 항상 한국어로 답변하세요. " +
                 "답변은 명확하고 친절해야 하며, 마크다운 형식을 사용할 수 있습니다."
             }
+          ],
+          // 출력 언어 설정 (Chrome AI Safety Check 필수)
+          // 지원 언어: en, es, ja (ko 미지원 - systemPrompt로 한국어 응답 유도)
+          expectedOutputs: [
+            { type: "text", languages: ["en"] }
           ],
           // AbortSignal 전달
           signal: abortControllerRef.current.signal,
@@ -228,12 +233,39 @@ export const useGemini = () => {
     [status]
   )
 
-  // 스트리밍 답변 생성 함수
+  // 스트리밍 답변 생성 함수 (멀티모달 지원)
   const generateStream = useCallback(
-    (input: string, options?: { signal?: AbortSignal }) => {
+    (input: string, options?: { signal?: AbortSignal; image?: string }) => {
       if (!sessionRef.current || status !== "ready") {
         throw new Error("AI 모델이 준비되지 않았습니다.")
       }
+
+      // 이미지가 있는 경우 멀티모달 프롬프트 구성
+      if (options?.image) {
+        // Base64 데이터 URL에서 Blob 생성
+        const base64Data = options.image.split(",")[1]
+        const mimeType = options.image.split(";")[0].split(":")[1]
+        const byteCharacters = atob(base64Data)
+        const byteNumbers = new Array(byteCharacters.length)
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i)
+        }
+        const byteArray = new Uint8Array(byteNumbers)
+        const imageBlob = new Blob([byteArray], { type: mimeType })
+
+        // 멀티모달 콘텐츠 배열
+        const content: LanguageModelContent[] = [
+          { type: "image", value: imageBlob },
+          { type: "text", value: input }
+        ]
+
+        return sessionRef.current.promptStreaming(
+          [{ role: "user", content }] as LanguageModelPrompt[],
+          { signal: options?.signal }
+        )
+      }
+
+      // 텍스트만 있는 경우
       return sessionRef.current.promptStreaming(input, {
         signal: options?.signal
       })

@@ -1,10 +1,11 @@
-import { Bot, User } from "lucide-react"
+import { Bot, User, Image as ImageIcon } from "lucide-react"
 import clsx from "clsx"
 import { CodeBlock } from "./CodeBlock"
 
 interface ChatMessageProps {
   role: "user" | "ai"
   text: string
+  image?: string // Base64 data URL
 }
 
 // 간단한 마크다운 파서 (코드 블록만 처리)
@@ -83,7 +84,7 @@ function renderInlineMarkdown(text: string) {
   return result
 }
 
-export function ChatMessage({ role, text }: ChatMessageProps) {
+export function ChatMessage({ role, text, image }: ChatMessageProps) {
   const parts = role === "ai" ? parseMessage(text) : []
 
   return (
@@ -119,7 +120,25 @@ export function ChatMessage({ role, text }: ChatMessageProps) {
         )}
       >
         {role === "user" ? (
-          <span className="whitespace-pre-wrap break-words">{text}</span>
+          <div className="space-y-2">
+            {/* 첨부된 이미지 */}
+            {image && (
+              <div className="relative">
+                <img
+                  src={image}
+                  alt="첨부 이미지"
+                  className="max-w-full max-h-48 rounded-lg object-contain bg-white/10"
+                />
+                <div className="absolute bottom-1 right-1 bg-black/50 text-white p-1 rounded">
+                  <ImageIcon className="w-3 h-3" />
+                </div>
+              </div>
+            )}
+            {/* 텍스트 */}
+            {text && (
+              <span className="whitespace-pre-wrap break-words">{text}</span>
+            )}
+          </div>
         ) : (
           <div className="space-y-2">
             {parts.map((part, index) => (

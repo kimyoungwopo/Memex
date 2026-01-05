@@ -21,8 +21,28 @@ Memex는 Chrome Built-in AI(Gemini Nano)를 활용한 로컬 프라이버시 보
   1. `CLAUDE.md` - Features 섹션에 기능 추가
   2. `doc/PRD.md` - 기능 요구사항 추가
   3. 필요시 `doc/TechSpec.md` - 기술 명세 추가
+  4. **`doc/history/YYYY-MM-DD-feature-name.md`** - 기능별 히스토리 문서 작성
 - 새 컴포넌트 생성 시 Source Structure 업데이트
 - 새 패키지 설치 시 Tech Stack 업데이트
+
+### 히스토리 문서화 규칙
+- 작업 완료 후 `doc/history/` 폴더에 기능별 문서 작성
+- 파일명 형식: `YYYY-MM-DD-feature-name.md` (예: `2026-01-05-multimodal-image.md`)
+- 필수 포함 내용:
+  ```markdown
+  # 기능명 (English Name)
+
+  **날짜:** YYYY-MM-DD
+  **난이도:** ⭐ ~ ⭐⭐⭐⭐⭐
+  **상태:** 완료 | 진행중 | 보류
+
+  ## 개요
+  ## 기능 상세
+  ## 추가/수정 파일
+  ## 코드 예시
+  ## 사용법 / 시나리오
+  ```
+- `doc/history/README.md`에 날짜별 기능 목록 테이블 업데이트
 
 ## Development Commands
 
@@ -61,10 +81,14 @@ Chrome Browser (Local)
 │   ├── Session 관리 (create/destroy/clone)
 │   ├── 다운로드 모니터링 (monitor)
 │   └── 토큰 관리 (inputUsage/inputQuota)
-└── [Phase 2] RAG Pipeline
-    ├── Content Scripts (페이지 스크래핑)
-    ├── Transformers.js (임베딩)
-    └── Orama DB (벡터 저장)
+├── useMemory Hook (RAG Pipeline)
+│   ├── Transformers.js (임베딩 생성)
+│   ├── Orama DB (벡터 저장/검색)
+│   ├── 하이브리드 검색 (Vector + Keyword)
+│   └── chrome.storage.local (영속화)
+└── [Future] Advanced Features
+    ├── 자동 페이지 기억 (백그라운드)
+    └── 크로스 디바이스 동기화
 ```
 
 ## Features
@@ -125,6 +149,37 @@ Chrome Browser (Local)
 - 대화 내보내기 (JSON, Markdown)
 - 페르소나 설정도 세션과 함께 저장/복원
 
+### 8. 멀티모달 이미지 입력 (Multimodal Image Input) - ⚠️ 비활성화
+> **상태:** 코드 구현 완료, UI 비활성화 (`ENABLE_IMAGE_INPUT = false`)
+> **사유:** Gemini Nano 멀티모달 성능 한계 (hallucination 발생)
+> **재활성화:** Chrome AI 모델 개선 시 `sidepanel.tsx`에서 플래그 변경
+
+- 이미지를 첨부하여 AI와 대화
+- 지원 입력 방식:
+  - **드래그 앤 드롭**: 이미지 파일을 채팅창에 드래그
+  - **클립보드 붙여넣기**: Ctrl+V / Cmd+V로 스크린샷 붙여넣기
+  - **파일 선택**: 버튼 클릭으로 이미지 파일 선택
+- 이미지 미리보기 (썸네일) 및 제거 기능
+- Base64 인코딩 → Blob 변환 → LanguageModelContent 배열 전달
+
+### 9. 로컬 벡터 RAG (Local Vector RAG) - 🧠 핵심 기능
+> **상태:** 구현 완료
+> **기술:** Transformers.js (임베딩) + Orama (벡터 검색)
+
+과거에 저장한 페이지를 기억하고, 질문 시 관련 기억을 자동으로 찾아 답변에 활용하는 RAG 시스템.
+
+- **기억하기 (Remember)**:
+  - 현재 페이지 텍스트를 벡터(384차원)로 변환
+  - Orama DB에 저장 (chrome.storage.local 영속화)
+  - 모델: `Xenova/all-MiniLM-L6-v2`
+- **회상하기 (Recall)**:
+  - 질문을 벡터로 변환
+  - 하이브리드 검색 (Vector 70% + Keyword 30%)
+  - 상위 3개 관련 기억을 프롬프트에 포함
+- **기억 관리**:
+  - 저장된 기억 목록 조회
+  - 개별/전체 삭제
+
 ## Tech Stack
 
 | 카테고리 | 기술 |
@@ -133,10 +188,11 @@ Chrome Browser (Local)
 | UI | React 18.2.0 + Tailwind CSS 3.4.1 |
 | Icons | lucide-react |
 | AI | Chrome Built-in AI (Gemini Nano) - Prompt API |
+| Embeddings | @xenova/transformers (all-MiniLM-L6-v2) |
+| Vector DB | @orama/orama 2.0.0 (벡터 검색) |
 | Markdown | 커스텀 파서 (코드 블록, 인라인 마크다운) |
 | Code Highlight | react-syntax-highlighter (hljs + atomOneDark) |
 | Utilities | clsx, tailwind-merge |
-| Vector DB | Orama 2.0.0 (Phase 2) |
 
 ## Source Structure
 
@@ -145,12 +201,17 @@ src/
 ├── components/
 │   ├── ChatMessage.tsx     # 메시지 말풍선 (마크다운 렌더링)
 │   ├── CodeBlock.tsx       # 코드 블록 (Syntax Highlight + 복사)
+│   ├── ImagePreview.tsx    # 이미지 미리보기 + 유틸 함수
+│   ├── MemoryPanel.tsx     # 저장된 기억 목록 패널
 │   ├── PersonaSelector.tsx # 페르소나 선택 드롭다운
 │   └── SessionList.tsx     # 대화 목록 사이드바
 ├── hooks/
-│   └── use-gemini.ts       # AI 세션 관리 (Prompt API)
+│   ├── use-gemini.ts       # AI 세션 관리 (Prompt API)
+│   └── use-memory.ts       # RAG 파이프라인 (기억하기/회상하기)
 ├── lib/
-│   └── chat-storage.ts     # 대화 저장소 유틸 (chrome.storage)
+│   ├── chat-storage.ts     # 대화 저장소 유틸 (chrome.storage)
+│   ├── embeddings.ts       # Transformers.js 임베딩 모듈
+│   └── vector-db.ts        # Orama 벡터 DB 모듈
 ├── background.ts           # Context Menu, Side Panel 제어
 ├── types.ts                # 공통 타입 + Persona + ChatSession
 ├── style.css               # Tailwind + 커스텀 스타일
@@ -211,6 +272,13 @@ while (true) {
   console.log(value) // 누적된 전체 텍스트
 }
 
+// 멀티모달 입력 (이미지 + 텍스트)
+const content = [
+  { type: "image", value: imageBlob },
+  { type: "text", value: "이 이미지를 설명해줘" }
+]
+const multimodalStream = session.promptStreaming([{ role: "user", content }])
+
 // 정리
 session.destroy()
 ```
@@ -225,3 +293,4 @@ session.destroy()
 | SideUi.md | 사이드 패널 UI 컴포넌트 |
 | AI Logic Hook.md | useGemini 훅 구현 |
 | Common Types.md | 공통 타입 정의 |
+| **history/** | 기능별 개발 히스토리 (날짜별 문서) |

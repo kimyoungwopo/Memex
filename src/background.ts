@@ -40,6 +40,38 @@ chrome.runtime.onInstalled.addListener(() => {
   })
 })
 
+// 메시지 핸들러 (Side Panel에서 요청)
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "FETCH_CAPTION") {
+    console.log("[Background] Fetching caption URL:", message.url)
+
+    // YouTube 자막 fetch (Background에서는 CORS 제한 없음)
+    fetch(message.url, {
+      headers: {
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.youtube.com/",
+        "Origin": "https://www.youtube.com",
+      },
+    })
+      .then((res) => {
+        console.log("[Background] Response status:", res.status, res.statusText)
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`)
+        }
+        return res.text()
+      })
+      .then((text) => {
+        console.log("[Background] Response length:", text.length, "Preview:", text.slice(0, 100))
+        sendResponse({ success: true, data: text })
+      })
+      .catch((err) => {
+        console.error("[Background] Fetch error:", err)
+        sendResponse({ success: false, error: err.message })
+      })
+    return true // 비동기 응답을 위해 true 반환
+  }
+})
+
 // Context Menu 클릭 핸들러
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!info.selectionText || !tab?.id) return
