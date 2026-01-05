@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+build/
+.plasmo/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Lock files (choose one)
+# package-lock.json
+# yarn.lock

@@ -1,0 +1,30 @@
+# Global Styles
+
+> `src/sidepanel/style.css` - 전역 스타일 및 스크롤바 커스텀
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', sans-serif;
+}
+
+/* 스크롤바 커스텀 (세련된 룩) */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e2e8f0;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+```
