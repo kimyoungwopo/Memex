@@ -127,10 +127,7 @@ export const useGemini = () => {
         console.log("✅ AI API found")
 
         // 2. 모델 가용성 확인 (최신 API: availability())
-        const availability = await languageModel.availability({
-          expectedInputs: [{ type: "text" }],
-          expectedOutputs: [{ type: "text" }]
-        })
+        const availability = await languageModel.availability()
         console.log("📊 Model Availability:", availability)
 
         if (availability === "unavailable") {
@@ -163,9 +160,6 @@ export const useGemini = () => {
                 "답변은 명확하고 친절해야 하며, 마크다운 형식을 사용할 수 있습니다."
             }
           ],
-          // 입출력 타입 및 언어 선언
-          expectedInputs: [{ type: "text", languages: ["ko", "en"] }],
-          expectedOutputs: [{ type: "text", languages: ["ko"] }],
           // AbortSignal 전달
           signal: abortControllerRef.current.signal,
           // 다운로드 진행상황 모니터링
