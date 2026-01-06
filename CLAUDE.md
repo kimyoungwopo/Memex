@@ -180,6 +180,60 @@ Chrome Browser (Local)
   - 저장된 기억 목록 조회
   - 개별/전체 삭제
 
+### 10. YouTube 영상 분석 (YouTube Transcript)
+- YouTube 영상 페이지에서 자막 추출 및 AI 요약
+- DOM 기반 자막 추출 (Transcript 패널에서 직접 추출)
+- 한국어/영어 자막 자동 선택
+- 타임스탬프 포함 요약 생성
+- 긴 영상은 청크 단위로 분할 처리
+
+### 11. 메모리 백업/복원 (Memory Backup)
+- 저장된 기억을 JSON 파일로 백업
+- 백업 파일에서 복원 (대체/병합 모드)
+- 포함 데이터: URL, 제목, 내용, 요약, 태그, 임베딩 벡터
+- 설정 패널에서 저장소 현황 확인
+- 전체 삭제 기능 (confirm 다이얼로그)
+
+### 12. 세렌디피티 엔진 (Serendipity Engine)
+- 브라우징 중 관련 기억 자동 알림
+- 탭 전환/페이지 방문 시 자동 유사도 검색
+- 유사도 25% 이상인 기억 감지
+- 보라색 배너로 관련 기억 표시 (최대 3개)
+- 확장 프로그램 아이콘에 배지 알림
+- 디바운스 처리 (1.5초)로 중복 방지
+
+### 13. PDF 문서 분석 (PDF Analysis)
+- Chrome에서 열린 PDF 문서 텍스트 추출
+- pdf.js 라이브러리 사용 (pdfjs-dist)
+- 최대 50페이지까지 지원
+- AI 요약 (3줄 핵심, 키워드, 문서 유형)
+- 분석 후 질문 응답 가능
+- 기억하기 연동
+
+### 14. 지식 그래프 시각화 (Knowledge Graph)
+- 저장된 기억들을 인터랙티브 2D 그래프로 시각화
+- 노드: 각 기억 (태그 기반 색상, 크기)
+- 엣지: 임베딩 코사인 유사도 기반 연결
+- 유사도 임계값 슬라이더 (10%~70%)
+- 드래그, 줌, 노드 클릭 인터랙션
+- react-force-graph-2d 사용
+- "On-Device AI Brain" 컨셉 시각화
+
+### 15. 스마트 온보딩 & 모델 관리자 (Model Manager)
+- **Welcome Page**: 첫 설치 시 친절한 온보딩 페이지
+- **하드웨어 체크**: WebGPU, Chrome AI, 브라우저 버전 자동 확인
+- **프로그레스 바**: "AI 두뇌를 심는 중... (35%)" 형태의 다운로드 진행률
+- **해결 방법 안내**: 요구사항 미충족 시 chrome://flags 설정 등 구체적 안내
+- **모델 재설치**: 설정 패널에서 모델 다시 다운로드 버튼
+- Cold Start 문제 해결로 사용자 이탈 방지
+
+### 16. 실시간 번역 (Real-time Translation)
+- 웹페이지에서 선택한 텍스트를 로컬 AI로 번역
+- **지원 언어**: 한국어, English, 日本語, 中文, Español, Français, Deutsch, Tiếng Việt
+- **페이지 주입**: 번역 결과를 웹페이지에 직접 표시 (툴팁 또는 텍스트 교체)
+- 외부 번역 서비스 없이 100% 로컬에서 동작
+- 편집 가능 영역에서는 선택 텍스트 직접 교체
+
 ## Tech Stack
 
 | 카테고리 | 기술 |
@@ -192,6 +246,8 @@ Chrome Browser (Local)
 | Vector DB | @orama/orama 2.0.0 (벡터 검색) |
 | Markdown | 커스텀 파서 (코드 블록, 인라인 마크다운) |
 | Code Highlight | react-syntax-highlighter (hljs + atomOneDark) |
+| PDF | pdfjs-dist (pdf.js) |
+| Graph | react-force-graph-2d (d3-force 기반) |
 | Utilities | clsx, tailwind-merge |
 
 ## Source Structure
@@ -202,16 +258,26 @@ src/
 │   ├── ChatMessage.tsx     # 메시지 말풍선 (마크다운 렌더링)
 │   ├── CodeBlock.tsx       # 코드 블록 (Syntax Highlight + 복사)
 │   ├── ImagePreview.tsx    # 이미지 미리보기 + 유틸 함수
+│   ├── KnowledgeGraph.tsx  # 지식 그래프 시각화 (react-force-graph)
+│   ├── MemoryDashboard.tsx # 기억 탭 대시보드
 │   ├── MemoryPanel.tsx     # 저장된 기억 목록 패널
-│   ├── PersonaSelector.tsx # 페르소나 선택 드롭다운
-│   └── SessionList.tsx     # 대화 목록 사이드바
+│   ├── ModelManager.tsx    # AI 모델 상태 관리 + 프로그레스 UI
+│   ├── PersonaSelector.tsx   # 페르소나 선택 드롭다운
+│   ├── WelcomePage.tsx       # 첫 설치 온보딩 페이지
+│   ├── TranslationPanel.tsx  # 실시간 번역 탭
+│   ├── SessionList.tsx       # 대화 목록 사이드바
+│   └── SettingsPanel.tsx     # 설정 패널 (백업/복원)
 ├── hooks/
 │   ├── use-gemini.ts       # AI 세션 관리 (Prompt API)
 │   └── use-memory.ts       # RAG 파이프라인 (기억하기/회상하기)
 ├── lib/
 │   ├── chat-storage.ts     # 대화 저장소 유틸 (chrome.storage)
-│   ├── embeddings.ts       # Transformers.js 임베딩 모듈
-│   └── vector-db.ts        # Orama 벡터 DB 모듈
+│   ├── embedding-client.ts # Sandbox 기반 임베딩 클라이언트
+│   ├── hardware-check.ts   # 하드웨어 요구사항 체크 (WebGPU, Chrome AI)
+│   ├── pdf.ts              # PDF 텍스트 추출 유틸 (pdf.js)
+│   ├── translation.ts      # 번역 유틸 (선택 텍스트, 주입)
+│   ├── vector-db.ts        # Orama 벡터 DB 모듈
+│   └── youtube.ts          # YouTube 자막 추출 유틸
 ├── background.ts           # Context Menu, Side Panel 제어
 ├── types.ts                # 공통 타입 + Persona + ChatSession
 ├── style.css               # Tailwind + 커스텀 스타일

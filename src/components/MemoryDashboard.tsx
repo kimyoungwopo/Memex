@@ -10,8 +10,10 @@ import {
   Search,
   X,
   Sparkles,
+  Network,
 } from "lucide-react"
 import clsx from "clsx"
+import { KnowledgeGraph } from "./KnowledgeGraph"
 
 interface MemoryItem {
   id: string
@@ -23,6 +25,10 @@ interface MemoryItem {
   score?: number // 검색 시 유사도 점수
 }
 
+interface MemoryWithEmbedding extends MemoryItem {
+  embedding?: number[]
+}
+
 interface MemoryDashboardProps {
   memories: MemoryItem[]
   isLoading: boolean
@@ -30,6 +36,7 @@ interface MemoryDashboardProps {
   onClearAll: () => Promise<void>
   onRefresh: () => Promise<void>
   onSearch?: (query: string) => Promise<MemoryItem[]> // 시맨틱 검색
+  onGetMemoriesWithEmbeddings?: () => Promise<MemoryWithEmbedding[]> // 그래프용
 }
 
 export function MemoryDashboard({
@@ -39,6 +46,7 @@ export function MemoryDashboard({
   onClearAll,
   onRefresh,
   onSearch,
+  onGetMemoriesWithEmbeddings,
 }: MemoryDashboardProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [isClearing, setIsClearing] = useState(false)
@@ -48,6 +56,27 @@ export function MemoryDashboard({
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<MemoryItem[] | null>(null)
   const [isSearching, setIsSearching] = useState(false)
+
+  // Knowledge Graph 상태
+  const [showGraph, setShowGraph] = useState(false)
+  const [graphMemories, setGraphMemories] = useState<MemoryWithEmbedding[]>([])
+  const [isLoadingGraph, setIsLoadingGraph] = useState(false)
+
+  // 그래프 열기
+  const handleOpenGraph = useCallback(async () => {
+    if (!onGetMemoriesWithEmbeddings) return
+
+    setIsLoadingGraph(true)
+    try {
+      const memoriesWithEmbeddings = await onGetMemoriesWithEmbeddings()
+      setGraphMemories(memoriesWithEmbeddings)
+      setShowGraph(true)
+    } catch (error) {
+      console.error("Failed to load graph data:", error)
+    } finally {
+      setIsLoadingGraph(false)
+    }
+  }, [onGetMemoriesWithEmbeddings])
 
   // 모든 고유 태그 추출
   const allTags = Array.from(
@@ -186,18 +215,36 @@ export function MemoryDashboard({
               {(selectedTag || searchResults !== null) && ` / ${memories.length}`}
             </span>
           </div>
-          <button
-            onClick={handleClearAll}
-            disabled={isClearing}
-            className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50 flex items-center gap-1"
-          >
-            {isClearing ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Trash2 className="w-3 h-3" />
+          <div className="flex items-center gap-2">
+            {/* Graph View Button */}
+            {onGetMemoriesWithEmbeddings && memories.length > 0 && (
+              <button
+                onClick={handleOpenGraph}
+                disabled={isLoadingGraph}
+                className="text-xs text-purple-600 hover:text-purple-800 disabled:opacity-50 flex items-center gap-1 px-2 py-1 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                title="지식 그래프로 보기"
+              >
+                {isLoadingGraph ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : (
+                  <Network className="w-3 h-3" />
+                )}
+                그래프
+              </button>
             )}
-            전체 삭제
-          </button>
+            <button
+              onClick={handleClearAll}
+              disabled={isClearing}
+              className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50 flex items-center gap-1"
+            >
+              {isClearing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Trash2 className="w-3 h-3" />
+              )}
+              전체 삭제
+            </button>
+          </div>
         </div>
 
         {/* Semantic Search Bar */}
@@ -373,6 +420,13 @@ export function MemoryDashboard({
           </div>
         ))}
       </div>
+
+      {/* Knowledge Graph Modal */}
+      <KnowledgeGraph
+        memories={graphMemories}
+        isOpen={showGraph}
+        onClose={() => setShowGraph(false)}
+      />
     </div>
   )
 }

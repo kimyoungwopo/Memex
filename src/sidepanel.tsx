@@ -21,6 +21,7 @@ import {
   PlayCircle,
   Clock,
   Settings,
+  Languages,
 } from "lucide-react"
 import clsx from "clsx"
 
@@ -55,7 +56,12 @@ import {
   prepareTranscriptForSummary,
   type TranscriptSegment,
 } from "./lib/youtube"
+import { isPdfUrl, extractPdfFromUrl } from "./lib/pdf"
+import { WelcomePage } from "./components/WelcomePage"
+import { TranslationPanel } from "./components/TranslationPanel"
 import "./style.css"
+
+const ONBOARDING_COMPLETE_KEY = "memex_onboarding_complete"
 
 interface Message {
   role: "user" | "ai"
@@ -82,6 +88,7 @@ function IndexSidePanel() {
     forgetMemory,
     forgetAll,
     formatMemoriesForPrompt,
+    getMemoriesWithEmbeddings,
   } = useMemory()
 
   const [input, setInput] = useState("")
@@ -103,7 +110,7 @@ function IndexSidePanel() {
   const [isLoadingSession, setIsLoadingSession] = useState(true)
 
   // Tab navigation
-  type TabType = "chat" | "memory" | "settings"
+  type TabType = "chat" | "memory" | "translate" | "settings"
   const [activeTab, setActiveTab] = useState<TabType>("chat")
   const [isLoadingMemories, setIsLoadingMemories] = useState(false)
 
@@ -133,6 +140,39 @@ function IndexSidePanel() {
   const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null)
   const [isAnalyzingVideo, setIsAnalyzingVideo] = useState(false)
   const [videoTranscript, setVideoTranscript] = useState<TranscriptSegment[] | null>(null)
+  const [lastVideoAnalysis, setLastVideoAnalysis] = useState<{
+    url: string
+    title: string
+    channelName: string
+    summary: string
+    transcript: string
+  } | null>(null)
+
+  // 세렌디피티 엔진 (관련 기억 자동 알림)
+  const [serendipityMemories, setSerendipityMemories] = useState<Array<{
+    id: string
+    url: string
+    title: string
+    summary: string
+    score: number
+    createdAt: number
+  }>>([])
+  const [showSerendipityBanner, setShowSerendipityBanner] = useState(false)
+  const [lastSerendipityUrl, setLastSerendipityUrl] = useState("")
+
+  // PDF 문서 분석
+  const [isPdfPage, setIsPdfPage] = useState(false)
+  const [isAnalyzingPdf, setIsAnalyzingPdf] = useState(false)
+  const [pdfContext, setPdfContext] = useState<{
+    title: string
+    url: string
+    content: string
+    pageCount: number
+  } | null>(null)
+
+  // 온보딩 상태
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [onboardingChecked, setOnboardingChecked] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -148,6 +188,49 @@ function IndexSidePanel() {
     }
   }, [messages, isThinking])
 
+  // 온보딩 체크 (첫 실행 또는 모델 다운로드 필요 시)
+  useEffect(() => {
+    const checkOnboarding = async () => {
+      try {
+        // 1. 온보딩 완료 여부 확인
+        const stored = await chrome.storage.local.get(ONBOARDING_COMPLETE_KEY)
+        const isOnboardingComplete = stored[ONBOARDING_COMPLETE_KEY] === true
+
+        if (!isOnboardingComplete) {
+          setShowOnboarding(true)
+        } else {
+          // 2. 모델 다운로드 필요 여부 확인 (온보딩 완료 후에도 모델이 없을 수 있음)
+          try {
+            // @ts-ignore
+            if (typeof LanguageModel !== "undefined") {
+              // @ts-ignore
+              const availability = await LanguageModel.availability()
+              if (availability === "after-download") {
+                // 모델 다운로드가 필요하면 온보딩 표시
+                setShowOnboarding(true)
+              }
+            }
+          } catch (e) {
+            // Chrome AI API 오류 시 온보딩 표시
+            console.warn("[Onboarding] Chrome AI check failed:", e)
+          }
+        }
+      } catch (error) {
+        console.error("[Onboarding] Check failed:", error)
+      } finally {
+        setOnboardingChecked(true)
+      }
+    }
+
+    checkOnboarding()
+  }, [])
+
+  // 온보딩 완료 핸들러
+  const handleOnboardingComplete = useCallback(async () => {
+    await chrome.storage.local.set({ [ONBOARDING_COMPLETE_KEY]: true })
+    setShowOnboarding(false)
+  }, [])
+
   // 초기 로딩 후 입력창 포커스
   useEffect(() => {
     if (status === "ready" && inputRef.current) {
@@ -155,39 +238,48 @@ function IndexSidePanel() {
     }
   }, [status])
 
-  // YouTube 페이지 감지
+  // YouTube / PDF 페이지 감지
   useEffect(() => {
-    const checkYouTubePage = async () => {
+    const checkPageType = async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
         if (tab?.url) {
+          // YouTube 체크
           const isYT = isYouTubeVideoUrl(tab.url)
           setIsYouTubePage(isYT)
           if (isYT) {
             const videoId = extractVideoId(tab.url)
             setYoutubeVideoId(videoId)
+            setIsPdfPage(false)
           } else {
             setYoutubeVideoId(null)
             setVideoTranscript(null)
+
+            // PDF 체크
+            const isPdf = isPdfUrl(tab.url)
+            setIsPdfPage(isPdf)
+            if (!isPdf) {
+              setPdfContext(null)
+            }
           }
         }
       } catch (error) {
-        console.error("YouTube page check failed:", error)
+        console.error("Page type check failed:", error)
       }
     }
 
     // 초기 체크
-    checkYouTubePage()
+    checkPageType()
 
     // 탭 변경 리스너
     const handleTabChange = () => {
-      checkYouTubePage()
+      checkPageType()
     }
 
     chrome.tabs.onActivated.addListener(handleTabChange)
     chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
       if (changeInfo.url) {
-        checkYouTubePage()
+        checkPageType()
       }
     })
 
@@ -476,6 +568,69 @@ function IndexSidePanel() {
     return () => chrome.storage.local.onChanged.removeListener(listener)
   }, [status, isThinking, generateStream, generate])
 
+  // ========== 세렌디피티 엔진: 관련 기억 자동 알림 ==========
+  useEffect(() => {
+    const SIMILARITY_THRESHOLD = 0.25 // 유사도 임계값 (25% 이상이면 알림)
+
+    const checkSerendipity = async () => {
+      // 메모리 시스템이 준비되지 않았으면 스킵
+      if (memoryStatus !== "ready") return
+
+      const result = await chrome.storage.local.get("serendipityPage")
+      const pageData = result.serendipityPage
+
+      if (!pageData || !pageData.content || pageData.content.length < 100) return
+
+      // 이미 분석한 URL이면 스킵
+      if (pageData.url === lastSerendipityUrl) return
+
+      console.log("[Serendipity] Checking for related memories:", pageData.title)
+      setLastSerendipityUrl(pageData.url)
+
+      try {
+        // 현재 페이지로 유사 기억 검색
+        const relatedMemories = await recallMemories(pageData.content.slice(0, 1000), 5)
+
+        // 유사도 임계값 이상인 기억만 필터링
+        const highSimilarityMemories = relatedMemories.filter(
+          (m) => m.score >= SIMILARITY_THRESHOLD && m.url !== pageData.url
+        )
+
+        if (highSimilarityMemories.length > 0) {
+          console.log("[Serendipity] Found", highSimilarityMemories.length, "related memories!")
+
+          setSerendipityMemories(highSimilarityMemories.slice(0, 3))
+          setShowSerendipityBanner(true)
+
+          // 배지 표시
+          chrome.runtime.sendMessage({
+            type: "SET_BADGE",
+            count: highSimilarityMemories.length,
+          })
+        } else {
+          setSerendipityMemories([])
+          setShowSerendipityBanner(false)
+          chrome.runtime.sendMessage({ type: "SET_BADGE", count: 0 })
+        }
+      } catch (error) {
+        console.error("[Serendipity] Search error:", error)
+      }
+    }
+
+    // 초기 체크
+    checkSerendipity()
+
+    // Storage 변경 리스너
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.serendipityPage?.newValue) {
+        checkSerendipity()
+      }
+    }
+
+    chrome.storage.local.onChanged.addListener(listener)
+    return () => chrome.storage.local.onChanged.removeListener(listener)
+  }, [memoryStatus, recallMemories, lastSerendipityUrl])
+
   // 현재 페이지 텍스트 추출
   const extractPageContent = async () => {
     setIsLoadingPage(true)
@@ -672,6 +827,91 @@ function IndexSidePanel() {
     })
   }
 
+  // YouTube 영상을 기억에 저장
+  const handleRememberVideo = async () => {
+    if (!lastVideoAnalysis) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          text: "❌ 먼저 '영상 분석' 버튼을 눌러 영상을 분석해주세요.",
+        },
+      ])
+      return
+    }
+
+    if (memoryStatus !== "ready") {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+          text: "⏳ 메모리 시스템이 아직 준비 중입니다. 잠시 후 다시 시도해주세요.",
+        },
+      ])
+      return
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "ai",
+        text: "🧠 영상을 기억하는 중입니다...\n\n1️⃣ AI 태그 생성 중...",
+      },
+    ])
+
+    // AI 태그 생성
+    let aiTags: string[] = []
+    try {
+      if (status === "ready") {
+        const tagPrompt = `이 YouTube 영상의 주제를 나타내는 핵심 키워드 3개를 해시태그 형식으로 뽑아줘. 반드시 #으로 시작하는 한글 키워드만 출력해. 예: #프로그래밍 #튜토리얼 #자바스크립트\n\n제목: ${lastVideoAnalysis.title}\n채널: ${lastVideoAnalysis.channelName}\n요약: ${lastVideoAnalysis.summary.slice(0, 500)}`
+        const tagResponse = await generate(tagPrompt)
+        const hashtagRegex = /#([^\s#]+)/g
+        const matches = tagResponse.match(hashtagRegex)
+        if (matches && matches.length > 0) {
+          aiTags = matches.slice(0, 5).map(tag => tag.replace('#', ''))
+        }
+      }
+    } catch (err) {
+      console.error("[handleRememberVideo] AI tag generation failed:", err)
+    }
+
+    // 메시지 업데이트 - 임베딩 단계
+    setMessages((prev) => {
+      const updated = [...prev]
+      updated[updated.length - 1] = {
+        role: "ai",
+        text: `🧠 영상을 기억하는 중입니다...\n\n1️⃣ AI 태그 생성 ✓${aiTags.length > 0 ? ` (${aiTags.map(t => '#' + t).join(' ')})` : ''}\n2️⃣ 임베딩 생성 중...`,
+      }
+      return updated
+    })
+
+    // 메모리에 저장
+    const result = await rememberPage({
+      url: lastVideoAnalysis.url,
+      title: `🎬 ${lastVideoAnalysis.title}`,
+      content: `[YouTube 영상]\n채널: ${lastVideoAnalysis.channelName}\n\n요약:\n${lastVideoAnalysis.summary}\n\n자막:\n${lastVideoAnalysis.transcript}`,
+      summary: lastVideoAnalysis.summary.slice(0, 80),
+      tags: ["YouTube", ...aiTags],
+    })
+
+    // 결과 메시지
+    setMessages((prev) => {
+      const updated = [...prev]
+      updated[updated.length - 1] = {
+        role: "ai",
+        text: result.success
+          ? `✅ 영상이 기억에 저장되었습니다!\n\n🎬 **${lastVideoAnalysis.title}**\n🏷️ **태그:** ${["YouTube", ...aiTags].map(t => '#' + t).join(' ')}\n\n이제 나중에 이 영상에 대해 물어보면 기억에서 찾아드릴게요!`
+          : `❌ ${result.message}`,
+      }
+      return updated
+    })
+
+    // 저장 후 초기화
+    if (result.success) {
+      setLastVideoAnalysis(null)
+    }
+  }
+
   // === YouTube 영상 분석 ===
   const handleAnalyzeVideo = async () => {
     if (!isYouTubePage || !youtubeVideoId || status !== "ready") return
@@ -775,10 +1015,30 @@ function IndexSidePanel() {
                 if (transcriptBtn) {
                   console.log("[Memex] Found transcript button, clicking...")
                   transcriptBtn.click()
-                  await new Promise((r) => setTimeout(r, 1500))
+
+                  // 패널이 나타날 때까지 최대 5초 대기 (반복 체크)
+                  for (let i = 0; i < 10; i++) {
+                    await new Promise((r) => setTimeout(r, 500))
+                    transcriptPanel = document.querySelector("ytd-transcript-renderer")
+                    if (transcriptPanel) {
+                      console.log("[Memex] Transcript panel appeared after", (i + 1) * 500, "ms")
+                      break
+                    }
+                    // engagement panel에서도 찾기
+                    const panels = document.querySelectorAll("ytd-engagement-panel-section-list-renderer")
+                    for (const panel of panels) {
+                      if (panel.querySelector("ytd-transcript-renderer")) {
+                        transcriptPanel = panel.querySelector("ytd-transcript-renderer")
+                        break
+                      }
+                    }
+                    if (transcriptPanel) break
+                  }
                 }
 
-                transcriptPanel = document.querySelector("ytd-transcript-renderer")
+                if (!transcriptPanel) {
+                  transcriptPanel = document.querySelector("ytd-transcript-renderer")
+                }
               }
 
               // 방법 3: engagement panel에서 찾기
@@ -793,10 +1053,34 @@ function IndexSidePanel() {
               }
 
               if (!transcriptPanel) {
-                console.log("[Memex] Transcript panel not found")
-                // 대체 방법: 영상 정보에서 기본 데이터 추출
+                console.log("[Memex] Transcript panel not found after retries, trying API fallback...")
+                // 대체 방법: ytInitialPlayerResponse에서 자막 URL 추출
                 // @ts-ignore
                 const playerResponse = window.ytInitialPlayerResponse
+                if (playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks) {
+                  const tracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks
+                  // 한국어 → 영어 → 첫 번째 자막 순으로 선택
+                  const track = tracks.find((t: any) => t.languageCode === 'ko') ||
+                               tracks.find((t: any) => t.languageCode === 'en') ||
+                               tracks[0]
+
+                  if (track?.baseUrl) {
+                    const details = playerResponse.videoDetails || {}
+                    console.log("[Memex] Found caption URL via API:", track.languageCode)
+                    ;(window as any)[resultKey] = {
+                      status: "caption_url",
+                      captionUrl: track.baseUrl,
+                      title: details.title || document.title,
+                      channelName: details.author || "",
+                      duration: parseInt(details.lengthSeconds) || 0,
+                      language: track.languageCode,
+                      kind: track.kind || "standard",
+                    }
+                    return
+                  }
+                }
+
+                // 자막 URL도 없으면 실패
                 if (playerResponse?.videoDetails) {
                   const details = playerResponse.videoDetails
                   ;(window as any)[resultKey] = {
@@ -922,8 +1206,59 @@ function IndexSidePanel() {
         throw new Error("이 영상에는 자막이 없거나, 자막 패널을 열 수 없습니다.\n\n영상에서 직접 자막 아이콘(CC)을 확인해주세요.")
       }
 
-      const segments = extractResult.segments as { text: string; start: number }[]
-      const isASR = false // DOM 추출이므로 ASR 여부 알 수 없음
+      let segments: { text: string; start: number }[] = []
+      let captionInfo = {
+        title: extractResult.title,
+        channelName: extractResult.channelName,
+        duration: extractResult.duration,
+        language: "ko",
+        kind: undefined as string | undefined,
+      }
+
+      // caption_url 상태: Background에서 자막 fetch
+      if (extractResult.status === "caption_url") {
+        console.log("[YouTube] Fetching caption from URL via background...")
+        setMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: "ai",
+            text: `🎬 **YouTube 영상 분석 중...**\n\n1️⃣ 자막 URL 발견 ✓\n2️⃣ 자막 다운로드 중...`,
+          }
+          return updated
+        })
+
+        // Background script로 fetch 요청
+        const captionResponse = await chrome.runtime.sendMessage({
+          type: "FETCH_CAPTION",
+          url: extractResult.captionUrl,
+        })
+
+        if (!captionResponse?.success || !captionResponse.data) {
+          throw new Error("자막 데이터를 가져올 수 없습니다.")
+        }
+
+        // 자막 XML 파싱
+        const captionData = captionResponse.data
+        const parsedSegments = parseTranscriptXml(captionData)
+
+        if (parsedSegments.length === 0) {
+          throw new Error("자막을 파싱할 수 없습니다.")
+        }
+
+        segments = parsedSegments.map(s => ({ text: s.text, start: s.start }))
+        captionInfo = {
+          title: extractResult.title,
+          channelName: extractResult.channelName,
+          duration: extractResult.duration,
+          language: extractResult.language || "ko",
+          kind: extractResult.kind,
+        }
+
+        console.log("[YouTube] Parsed", segments.length, "segments from API")
+      } else {
+        // DOM에서 추출된 segments
+        segments = extractResult.segments as { text: string; start: number }[]
+      }
 
       // 메시지 업데이트
       setMessages((prev) => {
@@ -934,15 +1269,6 @@ function IndexSidePanel() {
         }
         return updated
       })
-
-      // captionInfo 객체 구성
-      const captionInfo = {
-        title: extractResult.title,
-        channelName: extractResult.channelName,
-        duration: extractResult.duration,
-        language: "ko",
-        kind: undefined,
-      }
 
       // TranscriptSegment 형식으로 변환
       const transcriptSegments = segments.map((s) => ({
@@ -1033,6 +1359,16 @@ ${firstChunk}
 
       const summary = await generate(summaryPrompt)
 
+      // 분석 결과 저장 (기억하기용)
+      const currentUrl = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || ""
+      setLastVideoAnalysis({
+        url: currentUrl,
+        title: captionDataResult.title,
+        channelName: captionDataResult.channelName,
+        summary: summary,
+        transcript: totalText.slice(0, 8000), // 최대 8000자
+      })
+
       // 최종 결과 표시 (타임스탬프 클릭 가능하게)
       setMessages((prev) => {
         const updated = [...prev]
@@ -1054,6 +1390,112 @@ ${firstChunk}
       })
     } finally {
       setIsAnalyzingVideo(false)
+    }
+  }
+
+  // === PDF 문서 분석 ===
+  const handleAnalyzePdf = async () => {
+    if (!isPdfPage || status !== "ready") return
+
+    setIsAnalyzingPdf(true)
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "ai",
+        text: "📄 **PDF 문서 분석 중...**\n\n1️⃣ PDF 텍스트 추출 중...",
+      },
+    ])
+
+    try {
+      // 1. 현재 탭 URL 가져오기
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab.url) throw new Error("탭 URL을 가져올 수 없습니다.")
+
+      // 2. PDF 텍스트 추출
+      const result = await extractPdfFromUrl(tab.url)
+
+      if (!result.success || !result.text) {
+        throw new Error(result.error || "PDF 텍스트를 추출할 수 없습니다.")
+      }
+
+      console.log(`[PDF] Extracted ${result.text.length} chars from ${result.pageCount} pages`)
+
+      // 메시지 업데이트
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: "ai",
+          text: `📄 **PDF 문서 분석 중...**\n\n1️⃣ PDF 텍스트 추출 ✓ (${result.pageCount}페이지)\n2️⃣ AI 요약 생성 중...`,
+        }
+        return updated
+      })
+
+      // 3. PDF 컨텍스트 설정
+      const pdfTitle = result.title || tab.title || "PDF 문서"
+      setPdfContext({
+        title: pdfTitle,
+        url: tab.url,
+        content: result.text,
+        pageCount: result.pageCount,
+      })
+
+      // 4. AI 요약 생성
+      const summaryPrompt = `다음 PDF 문서 내용을 분석하여 요약해줘.
+
+**문서 제목:** ${pdfTitle}
+${result.author ? `**저자:** ${result.author}` : ""}
+**페이지 수:** ${result.pageCount}페이지
+
+**문서 내용:**
+${result.text.slice(0, 6000)}
+
+---
+
+다음 형식으로 답변해줘:
+
+## 📄 문서 요약
+
+### 핵심 내용 (3줄)
+1.
+2.
+3.
+
+### 주요 키워드
+- 키워드1, 키워드2, 키워드3
+
+### 문서 유형
+(예: 논문, 보고서, 매뉴얼 등)`
+
+      const summary = await generate(summaryPrompt)
+
+      // 결과 표시
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: "ai",
+          text: `📄 **"${pdfTitle}"**\n📑 ${result.pageCount}페이지${result.author ? ` • ${result.author}` : ""}\n\n${summary}\n\n---\n💡 이제 이 PDF에 대해 질문할 수 있습니다.`,
+        }
+        return updated
+      })
+
+      // 페이지 컨텍스트도 설정 (질문 응답용)
+      setPageContext({
+        title: pdfTitle,
+        url: tab.url,
+        content: result.text,
+      })
+    } catch (error) {
+      console.error("PDF analysis failed:", error)
+      setMessages((prev) => {
+        const updated = [...prev]
+        updated[updated.length - 1] = {
+          role: "ai",
+          text: `❌ PDF 분석 실패: ${error instanceof Error ? error.message : "알 수 없는 오류"}\n\n💡 온라인 PDF URL만 분석 가능합니다. 로컬 파일(file://)은 지원되지 않습니다.`,
+        }
+        return updated
+      })
+    } finally {
+      setIsAnalyzingPdf(false)
     }
   }
 
@@ -1295,6 +1737,21 @@ ${firstChunk}
     }
   }
 
+  // 온보딩 체크 완료 전 로딩 표시
+  if (!onboardingChecked) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900">
+        <div className="animate-spin w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full" />
+        <p className="mt-4 text-slate-400">로딩 중...</p>
+      </div>
+    )
+  }
+
+  // 온보딩 필요 시 환영 페이지 표시
+  if (showOnboarding) {
+    return <WelcomePage onComplete={handleOnboardingComplete} />
+  }
+
   return (
     <div className="flex flex-col min-h-screen h-full bg-slate-50 text-slate-900 font-sans" style={{ height: '100vh' }}>
       {/* --- Header --- */}
@@ -1403,6 +1860,18 @@ ${firstChunk}
             )}
           </button>
           <button
+            onClick={() => handleTabChange("translate")}
+            className={clsx(
+              "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+              activeTab === "translate"
+                ? "bg-white text-slate-800 shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Languages className="w-3.5 h-3.5" />
+            번역
+          </button>
+          <button
             onClick={() => handleTabChange("settings")}
             className={clsx(
               "flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
@@ -1420,6 +1889,52 @@ ${firstChunk}
       {/* === Chat Tab Content === */}
       {activeTab === "chat" && (
         <>
+          {/* --- 세렌디피티 배너: 관련 기억 알림 --- */}
+          {showSerendipityBanner && serendipityMemories.length > 0 && (
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-purple-100">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <Sparkles className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-purple-700">
+                      💡 이 페이지와 관련된 기억이 {serendipityMemories.length}개 있어요!
+                    </p>
+                    <div className="mt-2 space-y-1.5">
+                      {serendipityMemories.map((mem) => (
+                        <a
+                          key={mem.id}
+                          href={mem.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-[11px] text-purple-600 hover:text-purple-800 hover:underline truncate"
+                          title={`유사도: ${Math.round(mem.score * 100)}%\n${mem.summary || mem.title}`}
+                        >
+                          <span className="inline-block px-1.5 py-0.5 bg-purple-100 rounded text-[10px] mr-1.5">
+                            {Math.round(mem.score * 100)}%
+                          </span>
+                          {mem.title}
+                        </a>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-purple-500 mt-2">
+                      {new Date(serendipityMemories[0].createdAt).toLocaleDateString('ko-KR')}에 저장한 기억과 연관됩니다
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowSerendipityBanner(false)
+                    chrome.runtime.sendMessage({ type: "SET_BADGE", count: 0 })
+                  }}
+                  className="p-1 hover:bg-purple-100 rounded transition-colors shrink-0"
+                  title="닫기"
+                >
+                  <X className="w-4 h-4 text-purple-600" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* --- Page Context Banner --- */}
           {pageContext && (
             <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between gap-2">
@@ -1496,28 +2011,88 @@ ${firstChunk}
         <div className="flex gap-2">
           {/* YouTube Analysis Button - 유튜브 페이지에서만 표시 */}
           {isYouTubePage ? (
-            <button
-              onClick={handleAnalyzeVideo}
-              disabled={status !== "ready" || isAnalyzingVideo || isThinking}
-              className={clsx(
-                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
-                (status !== "ready" || isAnalyzingVideo || isThinking) && "opacity-50 cursor-not-allowed"
-              )}
-              title="YouTube 영상 자막을 분석하여 요약합니다"
-            >
-              {isAnalyzingVideo ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>분석 중...</span>
-                </>
-              ) : (
-                <>
-                  <Youtube className="w-4 h-4" />
-                  <span>영상 분석</span>
-                </>
-              )}
-            </button>
+            <>
+              <button
+                onClick={handleAnalyzeVideo}
+                disabled={status !== "ready" || isAnalyzingVideo || isThinking}
+                className={clsx(
+                  "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                  "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100",
+                  (status !== "ready" || isAnalyzingVideo || isThinking) && "opacity-50 cursor-not-allowed"
+                )}
+                title="YouTube 영상 자막을 분석하여 요약합니다"
+              >
+                {isAnalyzingVideo ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>분석 중...</span>
+                  </>
+                ) : (
+                  <>
+                    <Youtube className="w-4 h-4" />
+                    <span>영상 분석</span>
+                  </>
+                )}
+              </button>
+              {/* 영상 기억하기 버튼 - 분석 후 활성화 */}
+              <button
+                onClick={handleRememberVideo}
+                disabled={!lastVideoAnalysis || memoryStatus !== "ready" || isThinking}
+                className={clsx(
+                  "flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                  lastVideoAnalysis
+                    ? "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
+                    : "bg-slate-100 text-slate-400 border border-slate-200",
+                  (!lastVideoAnalysis || memoryStatus !== "ready" || isThinking) && "opacity-50 cursor-not-allowed"
+                )}
+                title={lastVideoAnalysis ? "분석한 영상을 기억에 저장합니다" : "먼저 영상을 분석하세요"}
+              >
+                <Brain className="w-4 h-4" />
+                <span>기억</span>
+              </button>
+            </>
+          ) : isPdfPage ? (
+            /* PDF Analysis Button - PDF 페이지에서 표시 */
+            <>
+              <button
+                onClick={handleAnalyzePdf}
+                disabled={status !== "ready" || isAnalyzingPdf || isThinking}
+                className={clsx(
+                  "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                  "bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100",
+                  (status !== "ready" || isAnalyzingPdf || isThinking) && "opacity-50 cursor-not-allowed"
+                )}
+                title="PDF 문서의 텍스트를 추출하여 분석합니다"
+              >
+                {isAnalyzingPdf ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>분석 중...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>PDF 분석</span>
+                  </>
+                )}
+              </button>
+              {/* PDF 기억하기 버튼 - 분석 후 활성화 */}
+              <button
+                onClick={handleRememberPage}
+                disabled={!pdfContext || memoryStatus !== "ready" || isMemorySaving || isThinking}
+                className={clsx(
+                  "flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                  pdfContext
+                    ? "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100"
+                    : "bg-slate-100 text-slate-400 border border-slate-200",
+                  (!pdfContext || memoryStatus !== "ready" || isMemorySaving || isThinking) && "opacity-50 cursor-not-allowed"
+                )}
+                title={pdfContext ? "분석한 PDF를 기억에 저장합니다" : "먼저 PDF를 분석하세요"}
+              >
+                <Brain className="w-4 h-4" />
+                <span>기억</span>
+              </button>
+            </>
           ) : (
             /* Page Read Button - 일반 페이지에서 표시 */
             <button
@@ -1545,37 +2120,39 @@ ${firstChunk}
             </button>
           )}
 
-          {/* Remember Button */}
-          <button
-            onClick={handleRememberPage}
-            disabled={!pageContext || memoryStatus !== "ready" || isMemorySaving || isThinking}
-            className={clsx(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-              "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100",
-              (!pageContext || memoryStatus !== "ready" || isMemorySaving || isThinking) && "opacity-50 cursor-not-allowed"
-            )}
-            title={
-              memoryStatus === "loading"
-                ? "임베딩 모델 로딩 중..."
-                : memoryStatus === "error"
-                ? "메모리 시스템 오류"
-                : !pageContext
-                ? "먼저 '페이지 읽기' 버튼을 눌러주세요"
-                : "현재 페이지를 기억에 저장"
-            }
-          >
-            {isMemorySaving ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>저장 중...</span>
-              </>
-            ) : (
-              <>
-                <Brain className="w-4 h-4" />
-                <span>기억하기</span>
-              </>
-            )}
-          </button>
+          {/* Remember Button - 일반 페이지에서만 표시 (YouTube/PDF는 인라인 버튼 사용) */}
+          {!isYouTubePage && !isPdfPage && (
+            <button
+              onClick={handleRememberPage}
+              disabled={!pageContext || memoryStatus !== "ready" || isMemorySaving || isThinking}
+              className={clsx(
+                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
+                "bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100",
+                (!pageContext || memoryStatus !== "ready" || isMemorySaving || isThinking) && "opacity-50 cursor-not-allowed"
+              )}
+              title={
+                memoryStatus === "loading"
+                  ? "임베딩 모델 로딩 중..."
+                  : memoryStatus === "error"
+                  ? "메모리 시스템 오류"
+                  : !pageContext
+                  ? "먼저 '페이지 읽기' 버튼을 눌러주세요"
+                  : "현재 페이지를 기억에 저장"
+              }
+            >
+              {isMemorySaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>저장 중...</span>
+                </>
+              ) : (
+                <>
+                  <Brain className="w-4 h-4" />
+                  <span>기억하기</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Context Mode Selector */}
@@ -1730,6 +2307,18 @@ ${firstChunk}
               score: r.score,
             }))
           }}
+          onGetMemoriesWithEmbeddings={getMemoriesWithEmbeddings}
+        />
+      )}
+
+      {/* === Translate Tab Content === */}
+      {activeTab === "translate" && (
+        <TranslationPanel
+          onTranslate={async (prompt) => {
+            const result = await generate(prompt, currentPersona.systemPrompt)
+            return result
+          }}
+          isLoading={isThinking}
         />
       )}
 

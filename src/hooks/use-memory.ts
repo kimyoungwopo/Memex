@@ -15,6 +15,7 @@ import {
   addMemory,
   hybridSearch,
   getAllMemories,
+  getAllMemoriesWithEmbeddings,
   deleteMemory,
   clearAllMemories,
   getMemoryCount,
@@ -279,6 +280,11 @@ export function useMemory() {
     []
   )
 
+  // 임베딩 포함 전체 메모리 조회 (Knowledge Graph용)
+  const getMemoriesWithEmbeddings = useCallback(async () => {
+    return getAllMemoriesWithEmbeddings()
+  }, [])
+
   return {
     status,
     memoryCount,
@@ -291,5 +297,6 @@ export function useMemory() {
     forgetMemory,
     forgetAll,
     formatMemoriesForPrompt,
+    getMemoriesWithEmbeddings,
   }
 }

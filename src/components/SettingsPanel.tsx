@@ -11,6 +11,7 @@ import {
   Info,
   FileJson,
   Shield,
+  Cpu,
 } from "lucide-react"
 import clsx from "clsx"
 import {
@@ -19,6 +20,7 @@ import {
   downloadBackup,
   type MemoryBackup,
 } from "../lib/vector-db"
+import { ModelManager } from "./ModelManager"
 
 interface SettingsPanelProps {
   memoryCount: number
@@ -181,6 +183,20 @@ export function SettingsPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* AI Model Section */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2 bg-purple-100 rounded-lg">
+              <Cpu className="w-5 h-5 text-purple-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">AI 모델</h3>
+              <p className="text-xs text-slate-500">Gemini Nano (로컬 AI)</p>
+            </div>
+          </div>
+          <ModelManager compact />
+        </div>
+
         {/* Storage Info Card */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <div className="flex items-center gap-3 mb-3">

@@ -28,3 +28,4 @@ pnpm-debug.log*
 # Lock files (choose one)
 # package-lock.json
 # yarn.lock
+dist/

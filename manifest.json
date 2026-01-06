@@ -27,10 +27,15 @@
     "contextMenus"
   ],
   "host_permissions": [
-    "https://*/*"
+    "https://*/*",
+    "http://localhost:*/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; object-src 'self'"
+  },
+  "sandbox": {
+    "pages": ["assets/sandbox.html"]
   },
   "web_accessible_resources": [
     {

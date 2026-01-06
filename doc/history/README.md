@@ -42,3 +42,15 @@
 | [대화 히스토리 저장](./2026-01-05-chat-persistence.md) | ⭐⭐⭐ | chat-storage.ts, SessionList.tsx |
 | [멀티모달 이미지 입력](./2026-01-05-multimodal-image.md) | ⭐⭐⭐ | ImagePreview.tsx, use-gemini.ts | **비활성화** |
 | [로컬 벡터 RAG](./2026-01-05-local-vector-rag.md) | ⭐⭐⭐⭐⭐ | embeddings.ts, vector-db.ts, use-memory.ts | **핵심 기능** |
+| [YouTube 자막 추출](./2026-01-05-youtube-transcript.md) | ⭐⭐⭐⭐ | youtube.ts, sidepanel.tsx |
+| [메모리 백업/복원](./2026-01-05-memory-backup.md) | ⭐⭐⭐ | vector-db.ts, SettingsPanel.tsx |
+| [세렌디피티 엔진](./2026-01-05-serendipity-engine.md) | ⭐⭐⭐ | background.ts, sidepanel.tsx |
+| [PDF 문서 분석](./2026-01-05-pdf-analysis.md) | ⭐⭐⭐ | pdf.ts, sidepanel.tsx |
+
+## 2026-01-06
+
+| 기능 | 난이도 | 파일 |
+|------|--------|------|
+| [지식 그래프 시각화](./2026-01-06-knowledge-graph.md) | ⭐⭐⭐⭐ | KnowledgeGraph.tsx, MemoryDashboard.tsx |
+| [스마트 온보딩 & 모델 관리자](./2026-01-06-model-manager.md) | ⭐⭐⭐⭐ | ModelManager.tsx, WelcomePage.tsx, hardware-check.ts |
+| [실시간 번역](./2026-01-06-translation.md) | ⭐⭐⭐ | TranslationPanel.tsx, translation.ts |

@@ -7,20 +7,19 @@
 
 import { pipeline, env, type FeatureExtractionPipeline } from "@xenova/transformers"
 
-// Chrome Extension 환경 설정 (안전하게 적용)
-try {
-  // @ts-ignore
-  if (env) {
-    env.allowLocalModels = false
-    env.useBrowserCache = true
-    // Web Worker 비활성화
-    if (env.backends?.onnx?.wasm) {
-      env.backends.onnx.wasm.numThreads = 1
-    }
-  }
-} catch (e) {
-  console.warn("Failed to set transformers.js env:", e)
+// Chrome Extension 환경 설정 (ONNX Runtime 호환)
+env.allowLocalModels = false
+env.useBrowserCache = true
+// WASM 백엔드만 사용 (WebGPU/WebGL 비활성화)
+env.backends = {
+  onnx: {
+    wasm: {
+      numThreads: 1,
+    },
+  },
 }
+// CDN에서 WASM 파일 로드
+env.allowRemoteModels = true
 
 // 싱글톤 파이프라인 인스턴스
 let embeddingPipeline: FeatureExtractionPipeline | null = null

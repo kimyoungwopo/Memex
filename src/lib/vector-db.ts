@@ -17,6 +17,7 @@ const schema = {
   summary: "string",
   tags: "string[]",  // AI 자동 태깅
   embedding: `vector[${EMBEDDING_DIMENSION}]`,
+  embeddingJson: "string",  // 임베딩 백업 (save/load 시 벡터 손실 방지)
   createdAt: "number",
 } as const
 
@@ -94,6 +95,7 @@ export async function addMemory(memory: {
     summary: memory.summary,
     tags: memory.tags || [],
     embedding: memory.embedding,
+    embeddingJson: JSON.stringify(memory.embedding),  // 백업용
     createdAt: Date.now(),
   })
 
@@ -501,6 +503,7 @@ export async function importMemories(
           summary: memory.summary,
           tags: memory.tags || [],
           embedding: memory.embedding,
+          embeddingJson: JSON.stringify(memory.embedding),  // 백업용
           createdAt: memory.createdAt,
         })
         imported++
@@ -528,6 +531,62 @@ export async function importMemories(
       message: `복원 실패: ${error instanceof Error ? error.message : "알 수 없는 오류"}`,
     }
   }
+}
+
+/**
+ * 모든 메모리를 임베딩과 함께 조회 (Knowledge Graph용)
+ */
+export async function getAllMemoriesWithEmbeddings(): Promise<Array<{
+  id: string
+  url: string
+  title: string
+  summary: string
+  tags: string[]
+  embedding: number[]
+  createdAt: number
+}>> {
+  const database = await initVectorDB()
+
+  const results = await search(database, {
+    term: "",
+    limit: 10000,
+    includeVectors: true,
+  })
+
+  // 디버깅
+  if (results.hits.length > 0) {
+    const firstHit = results.hits[0] as any
+    const hasEmbeddingJson = !!firstHit.document.embeddingJson
+    console.log("[getAllMemoriesWithEmbeddings] embeddingJson exists:", hasEmbeddingJson)
+    if (hasEmbeddingJson) {
+      console.log("[getAllMemoriesWithEmbeddings] embeddingJson length:", firstHit.document.embeddingJson.length)
+    }
+  }
+
+  return results.hits
+    .map((hit: any) => {
+      // embeddingJson 필드에서 복원 (save/load 시 벡터 손실 방지)
+      let embedding: number[] = []
+
+      if (hit.document.embeddingJson) {
+        try {
+          embedding = JSON.parse(hit.document.embeddingJson)
+        } catch (e) {
+          console.error("[getAllMemoriesWithEmbeddings] Failed to parse embeddingJson:", e)
+        }
+      }
+
+      return {
+        id: hit.document.id,
+        url: hit.document.url,
+        title: hit.document.title,
+        summary: hit.document.summary,
+        tags: hit.document.tags || [],
+        embedding,
+        createdAt: hit.document.createdAt,
+      }
+    })
+    .sort((a, b) => b.createdAt - a.createdAt)
 }
 
 /**
