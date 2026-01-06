@@ -1,6 +1,11 @@
 import { Bot, User, Image as ImageIcon } from "lucide-react"
 import clsx from "clsx"
+import DOMPurify from "dompurify"
 import { CodeBlock } from "./CodeBlock"
+
+// DOMPurify 설정: 허용할 태그 및 속성 제한
+const ALLOWED_TAGS = ["code", "strong", "em"]
+const ALLOWED_ATTR = ["class"]
 
 interface ChatMessageProps {
   role: "user" | "ai"
@@ -54,9 +59,19 @@ function parseMessage(text: string) {
 }
 
 // 인라인 마크다운 처리 (볼드, 이탤릭, 인라인 코드)
-function renderInlineMarkdown(text: string) {
+// XSS 방지: DOMPurify로 sanitize 처리
+function renderInlineMarkdown(text: string): string {
+  // 1. 먼저 HTML 특수문자 이스케이프 (기본 보호)
+  let escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+
+  // 2. 마크다운 패턴을 HTML로 변환
   // 인라인 코드: `code`
-  let result = text.replace(
+  let result = escaped.replace(
     /`([^`]+)`/g,
     '<code class="px-1.5 py-0.5 bg-slate-100 text-indigo-600 rounded text-xs font-mono">$1</code>'
   )
@@ -81,7 +96,11 @@ function renderInlineMarkdown(text: string) {
     '<em class="italic">$1</em>'
   )
 
-  return result
+  // 3. DOMPurify로 최종 sanitize (허용된 태그/속성만 유지)
+  return DOMPurify.sanitize(result, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+  })
 }
 
 export function ChatMessage({ role, text, image }: ChatMessageProps) {

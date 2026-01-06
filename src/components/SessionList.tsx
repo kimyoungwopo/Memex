@@ -81,6 +81,7 @@ export function SessionList({
           </button>
           <button
             onClick={onClose}
+            aria-label="대화 목록 닫기"
             className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5 text-slate-500" />
@@ -159,7 +160,8 @@ export function SessionList({
                         setExportMenuId(exportMenuId === session.id ? null : session.id)
                       }}
                       className="p-1.5 hover:bg-slate-200 rounded transition-colors"
-                      title="내보내기"
+                      aria-label="대화 내보내기"
+                      aria-expanded={exportMenuId === session.id}
                     >
                       <Download className="w-4 h-4 text-slate-500" />
                     </button>
@@ -198,7 +200,7 @@ export function SessionList({
                       handleDelete(session.id)
                     }}
                     className="p-1.5 hover:bg-red-100 rounded transition-colors"
-                    title="삭제"
+                    aria-label="대화 삭제"
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
                   </button>

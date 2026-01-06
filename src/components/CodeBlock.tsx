@@ -56,6 +56,7 @@ export function CodeBlock({ language, children }: CodeBlockProps) {
         <span className="font-mono">{language || "code"}</span>
         <button
           onClick={handleCopy}
+          aria-label={copied ? "코드가 복사되었습니다" : "코드 복사"}
           className={clsx(
             "flex items-center gap-1.5 px-2 py-1 rounded transition-all",
             copied

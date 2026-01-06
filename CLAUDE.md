@@ -180,12 +180,17 @@ Chrome Browser (Local)
   - 저장된 기억 목록 조회
   - 개별/전체 삭제
 
-### 10. YouTube 영상 분석 (YouTube Transcript)
+### 10. YouTube 영상 분석 (YouTube Transcript) - ⚠️ 개선중
+> **상태:** 코드 구현 완료, UI 비활성화 (`ENABLE_YOUTUBE_ANALYSIS = false`)
+> **사유:** 자막 추출 안정성 및 청크 요약 품질 개선 필요
+> **재활성화:** 개선 완료 후 `sidepanel.tsx`에서 플래그 변경
+
 - YouTube 영상 페이지에서 자막 추출 및 AI 요약
-- DOM 기반 자막 추출 (Transcript 패널에서 직접 추출)
-- 한국어/영어 자막 자동 선택
+- API 기반 자막 추출 (`ytInitialPlayerResponse.captions`)
+- 한국어 → 영어 → 기타 언어 우선순위 자동 선택
 - 타임스탬프 포함 요약 생성
-- 긴 영상은 청크 단위로 분할 처리
+- 긴 영상: 청크별 요약 후 통합 (전체 내용 요약)
+- 실시간 진행 상태 표시 ("청크 분석 중... 3/7")
 
 ### 11. 메모리 백업/복원 (Memory Backup)
 - 저장된 기억을 JSON 파일로 백업
@@ -269,7 +274,8 @@ src/
 │   └── SettingsPanel.tsx     # 설정 패널 (백업/복원)
 ├── hooks/
 │   ├── use-gemini.ts       # AI 세션 관리 (Prompt API)
-│   └── use-memory.ts       # RAG 파이프라인 (기억하기/회상하기)
+│   ├── use-memory.ts       # RAG 파이프라인 (기억하기/회상하기)
+│   └── use-youtube.ts      # YouTube 분석 (자막추출, 청크요약, 타임스탬프)
 ├── lib/
 │   ├── chat-storage.ts     # 대화 저장소 유틸 (chrome.storage)
 │   ├── embedding-client.ts # Sandbox 기반 임베딩 클라이언트

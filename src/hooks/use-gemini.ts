@@ -1,100 +1,26 @@
 import { useEffect, useState, useCallback, useRef } from "react"
 
-// Chrome Built-in AI 최신 타입 정의 (2026 Prompt API Spec)
+// Chrome Built-in AI 타입은 src/global.d.ts에서 전역 선언됨
 // https://github.com/webmachinelearning/prompt-api
-
-type LanguageModelAvailability = "available" | "downloadable" | "downloading" | "unavailable"
-
-interface LanguageModelParams {
-  defaultTemperature: number
-  maxTemperature: number
-  defaultTopK: number
-  maxTopK: number
-}
-
-interface LanguageModelPrompt {
-  role: "system" | "user" | "assistant"
-  content: string | LanguageModelContent[]
-}
-
-interface LanguageModelContent {
-  type: "text" | "image" | "audio"
-  value: string | Blob | ImageData | ImageBitmap | AudioBuffer | BufferSource
-}
-
-interface LanguageModelExpectedIO {
-  type?: "text" | "image" | "audio"
-  languages?: string[]
-}
-
-interface LanguageModelCreateOptions {
-  initialPrompts?: LanguageModelPrompt[]
-  temperature?: number
-  topK?: number
-  expectedInputs?: LanguageModelExpectedIO[]
-  expectedOutputs?: LanguageModelExpectedIO[]
-  signal?: AbortSignal
-  monitor?: (monitor: LanguageModelDownloadMonitor) => void
-}
-
-interface LanguageModelDownloadMonitor extends EventTarget {
-  addEventListener(
-    type: "downloadprogress",
-    listener: (event: LanguageModelDownloadProgressEvent) => void
-  ): void
-}
-
-interface LanguageModelDownloadProgressEvent extends Event {
-  loaded: number
-}
-
-interface LanguageModelPromptOptions {
-  signal?: AbortSignal
-  responseConstraint?: object | RegExp
-}
-
-interface LanguageModelSession {
-  prompt: (input: string | LanguageModelPrompt[], options?: LanguageModelPromptOptions) => Promise<string>
-  promptStreaming: (input: string | LanguageModelPrompt[], options?: LanguageModelPromptOptions) => ReadableStream<string>
-  append: (prompts: LanguageModelPrompt[]) => Promise<void>
-  measureInputUsage: (input: string | LanguageModelPrompt[]) => Promise<number>
-  clone: (options?: { signal?: AbortSignal }) => Promise<LanguageModelSession>
-  destroy: () => void
-  readonly inputUsage: number
-  readonly inputQuota: number
-  addEventListener(type: "quotaoverflow", listener: () => void): void
-}
-
-interface LanguageModelAPI {
-  availability: (options?: {
-    expectedInputs?: LanguageModelExpectedIO[]
-    expectedOutputs?: LanguageModelExpectedIO[]
-  }) => Promise<LanguageModelAvailability>
-  params: () => Promise<LanguageModelParams | null>
-  create: (options?: LanguageModelCreateOptions) => Promise<LanguageModelSession>
-}
 
 export type AIStatus = "loading" | "ready" | "downloading" | "error" | "unsupported"
 
-// AI API 찾기 (여러 경로 시도)
+/**
+ * AI API 찾기 (여러 경로 시도)
+ * 타입은 global.d.ts에서 전역 선언되어 @ts-ignore 불필요
+ */
 const getLanguageModel = (): LanguageModelAPI | null => {
   // 1. 전역 LanguageModel 객체 확인 (최신 스펙)
-  // @ts-ignore
   if (typeof LanguageModel !== "undefined") {
-    // @ts-ignore
-    return LanguageModel as LanguageModelAPI
+    return LanguageModel
   }
   // 2. window.ai.languageModel 확인 (레거시 호환)
-  // @ts-ignore
   if (typeof window !== "undefined" && window.ai?.languageModel) {
-    // @ts-ignore
-    return window.ai.languageModel as LanguageModelAPI
+    return window.ai.languageModel
   }
-  // 3. self.ai.languageModel 확인
-  // @ts-ignore
+  // 3. self.ai.languageModel 확인 (Service Worker 환경)
   if (typeof self !== "undefined" && self.ai?.languageModel) {
-    // @ts-ignore
-    return self.ai.languageModel as LanguageModelAPI
+    return self.ai.languageModel
   }
   return null
 }
@@ -148,8 +74,8 @@ export const useGemini = () => {
 
         console.log("🚀 Creating AI session...")
 
-        // 4. 세션 생성 (최신 API 스펙 - 2026)
-        const newSession = await languageModel.create({
+        // 4. 세션 생성 (최신 API 스펙 - 2026) + 30초 타임아웃
+        const createSessionPromise = languageModel.create({
           // initialPrompts로 시스템 프롬프트 설정
           initialPrompts: [
             {
@@ -176,6 +102,15 @@ export const useGemini = () => {
             })
           }
         })
+
+        // 타임아웃 (30초) - 모델 다운로드 중이 아닐 때만 적용
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("AI 세션 생성 시간 초과 (30초). Chrome을 재시작해주세요."))
+          }, 30000)
+        })
+
+        const newSession = await Promise.race([createSessionPromise, timeoutPromise])
 
         sessionRef.current = newSession
         setStatus("ready")

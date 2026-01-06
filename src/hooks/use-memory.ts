@@ -56,18 +56,19 @@ export function useMemory() {
     let mounted = true
     let retryCount = 0
     const maxRetries = 5
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
 
-    const checkStatus = async () => {
+    const checkStatus = async (): Promise<boolean> => {
       try {
         const { status: embStatus, error: embError } = await getEmbeddingStatus()
 
-        if (!mounted) return
+        if (!mounted) return true  // mounted가 false면 polling 중단
 
         if (embStatus === "ready") {
           setStatus("ready")
           // 메모리 개수 로드
           const count = await getMemoryCount()
-          setMemoryCount(count)
+          if (mounted) setMemoryCount(count)
           return true
         } else if (embStatus === "loading") {
           setStatus("loading")
@@ -79,8 +80,10 @@ export function useMemory() {
           return false
         } else if (embStatus === "error") {
           console.error("[useMemory] Embedding error:", embError)
-          setError(embError || "Unknown embedding error")
-          setStatus("error")
+          if (mounted) {
+            setError(embError || "Unknown embedding error")
+            setStatus("error")
+          }
           return true
         }
       } catch (err) {
@@ -90,8 +93,10 @@ export function useMemory() {
           retryCount++
           return false
         }
-        setError(err instanceof Error ? err.message : "Unknown error")
-        setStatus("error")
+        if (mounted) {
+          setError(err instanceof Error ? err.message : "Unknown error")
+          setStatus("error")
+        }
         return true
       }
       return false
@@ -100,16 +105,21 @@ export function useMemory() {
     const pollStatus = async () => {
       const done = await checkStatus()
       if (!done && mounted) {
-        // 1초 후 재시도
-        setTimeout(pollStatus, 1000)
+        // 1초 후 재시도 (타이머 참조 저장)
+        timeoutId = setTimeout(pollStatus, 1000)
       }
     }
 
     // 초기 상태 확인 (약간의 딜레이 후 - Offscreen 로딩 대기)
-    setTimeout(pollStatus, 500)
+    timeoutId = setTimeout(pollStatus, 500)
 
+    // Cleanup: 타이머 정리
     return () => {
       mounted = false
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+        timeoutId = null
+      }
     }
   }, [])
 

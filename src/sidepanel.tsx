@@ -27,6 +27,7 @@ import clsx from "clsx"
 
 import { useGemini } from "./hooks/use-gemini"
 import { useMemory } from "./hooks/use-memory"
+import { useYouTube } from "./hooks/use-youtube"
 import { ChatMessage } from "./components/ChatMessage"
 import { PersonaSelector } from "./components/PersonaSelector"
 import { SessionList } from "./components/SessionList"
@@ -48,14 +49,7 @@ import {
   createSession,
   saveSession,
 } from "./lib/chat-storage"
-import {
-  isYouTubeVideoUrl,
-  extractVideoId,
-  formatTimestamp,
-  parseTranscriptXml,
-  prepareTranscriptForSummary,
-  type TranscriptSegment,
-} from "./lib/youtube"
+import { formatTimestamp } from "./lib/youtube"
 import { isPdfUrl, extractPdfFromUrl } from "./lib/pdf"
 import { WelcomePage } from "./components/WelcomePage"
 import { TranslationPanel } from "./components/TranslationPanel"
@@ -132,21 +126,25 @@ function IndexSidePanel() {
   // Image input (disabled - Gemini Nano multimodal performance is limited)
   // TODO: Re-enable when Chrome AI model improves
   const ENABLE_IMAGE_INPUT = false
+
+  // YouTube analysis (disabled - under improvement)
+  // TODO: Re-enable after refactoring
+  const ENABLE_YOUTUBE_ANALYSIS = false
   const [attachedImage, setAttachedImage] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  // YouTube 영상 분석
-  const [isYouTubePage, setIsYouTubePage] = useState(false)
-  const [youtubeVideoId, setYoutubeVideoId] = useState<string | null>(null)
-  const [isAnalyzingVideo, setIsAnalyzingVideo] = useState(false)
-  const [videoTranscript, setVideoTranscript] = useState<TranscriptSegment[] | null>(null)
-  const [lastVideoAnalysis, setLastVideoAnalysis] = useState<{
-    url: string
-    title: string
-    channelName: string
-    summary: string
-    transcript: string
-  } | null>(null)
+  // YouTube 영상 분석 (훅 사용)
+  const {
+    isYouTubePage,
+    videoId: youtubeVideoId,
+    isAnalyzing: isAnalyzingVideo,
+    transcript: videoTranscript,
+    lastAnalysis: lastVideoAnalysis,
+    progress: youtubeProgress,
+    error: youtubeError,
+    analyzeVideo,
+    jumpToTimestamp,
+  } = useYouTube({ generate, aiStatus: status })
 
   // 세렌디피티 엔진 (관련 기억 자동 알림)
   const [serendipityMemories, setSerendipityMemories] = useState<Array<{
@@ -238,55 +236,40 @@ function IndexSidePanel() {
     }
   }, [status])
 
-  // YouTube / PDF 페이지 감지
+  // PDF 페이지 감지 (YouTube는 useYouTube 훅에서 처리)
   useEffect(() => {
-    const checkPageType = async () => {
+    const checkPdfPage = async () => {
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-        if (tab?.url) {
-          // YouTube 체크
-          const isYT = isYouTubeVideoUrl(tab.url)
-          setIsYouTubePage(isYT)
-          if (isYT) {
-            const videoId = extractVideoId(tab.url)
-            setYoutubeVideoId(videoId)
-            setIsPdfPage(false)
-          } else {
-            setYoutubeVideoId(null)
-            setVideoTranscript(null)
-
-            // PDF 체크
-            const isPdf = isPdfUrl(tab.url)
-            setIsPdfPage(isPdf)
-            if (!isPdf) {
-              setPdfContext(null)
-            }
+        if (tab?.url && !isYouTubePage) {
+          const isPdf = isPdfUrl(tab.url)
+          setIsPdfPage(isPdf)
+          if (!isPdf) {
+            setPdfContext(null)
           }
+        } else {
+          setIsPdfPage(false)
         }
       } catch (error) {
-        console.error("Page type check failed:", error)
+        console.error("PDF page check failed:", error)
       }
     }
 
-    // 초기 체크
-    checkPageType()
+    checkPdfPage()
 
-    // 탭 변경 리스너
-    const handleTabChange = () => {
-      checkPageType()
+    const handleTabChange = () => checkPdfPage()
+    const handleTabUpdate = (_: number, changeInfo: chrome.tabs.TabChangeInfo) => {
+      if (changeInfo.url) checkPdfPage()
     }
 
     chrome.tabs.onActivated.addListener(handleTabChange)
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-      if (changeInfo.url) {
-        checkPageType()
-      }
-    })
+    chrome.tabs.onUpdated.addListener(handleTabUpdate)
 
     return () => {
       chrome.tabs.onActivated.removeListener(handleTabChange)
+      chrome.tabs.onUpdated.removeListener(handleTabUpdate)
     }
-  }, [])
+  }, [isYouTubePage])
 
   // 세션 로드 (초기화)
   useEffect(() => {
@@ -906,17 +889,13 @@ function IndexSidePanel() {
       return updated
     })
 
-    // 저장 후 초기화
-    if (result.success) {
-      setLastVideoAnalysis(null)
-    }
   }
 
-  // === YouTube 영상 분석 ===
+  // === YouTube 영상 분석 (훅 사용) ===
   const handleAnalyzeVideo = async () => {
     if (!isYouTubePage || !youtubeVideoId || status !== "ready") return
 
-    setIsAnalyzingVideo(true)
+    // 분석 시작 메시지
     setMessages((prev) => [
       ...prev,
       {
@@ -926,458 +905,21 @@ function IndexSidePanel() {
     ])
 
     try {
-      // 1. YouTube 자막 추출 (Content Script 실행)
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab.id) throw new Error("탭을 찾을 수 없습니다.")
+      // 훅의 analyzeVideo 호출
+      const analysis = await analyzeVideo()
 
-      // YouTube Transcript 패널에서 직접 자막 추출
-      console.log("[YouTube] Extracting captions from transcript panel...")
-
-      setMessages((prev) => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: "ai",
-          text: `🎬 **YouTube 영상 분석 중...**\n\n1️⃣ 자막 패널 열기 중...`,
-        }
-        return updated
-      })
-
-      // 스크립트 주입: Transcript 패널 열고 자막 추출
-      const extractResultKey = `__memex_transcript_${Date.now()}`
-
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: "MAIN",
-        args: [extractResultKey],
-        func: (resultKey: string) => {
-          (window as any)[resultKey] = { status: "pending" }
-
-          const extractTranscript = async () => {
-            try {
-              console.log("[Memex] Starting transcript extraction...")
-
-              // 방법 1: 이미 열린 transcript 패널에서 추출
-              let transcriptPanel = document.querySelector("ytd-transcript-renderer")
-
-              // 방법 2: transcript 버튼 클릭해서 열기
-              if (!transcriptPanel) {
-                console.log("[Memex] Opening transcript panel...")
-
-                // "더보기" 버튼 클릭 (설명 펼치기)
-                const expandBtn = document.querySelector("#expand") as HTMLElement
-                if (expandBtn) {
-                  expandBtn.click()
-                  await new Promise((r) => setTimeout(r, 500))
-                }
-
-                // "스크립트 표시" 버튼 찾기
-                const buttons = document.querySelectorAll("button, ytd-button-renderer")
-                let transcriptBtn: HTMLElement | null = null
-
-                for (const btn of buttons) {
-                  const text = btn.textContent?.toLowerCase() || ""
-                  if (
-                    text.includes("transcript") ||
-                    text.includes("스크립트") ||
-                    text.includes("자막")
-                  ) {
-                    transcriptBtn = btn as HTMLElement
-                    break
-                  }
-                }
-
-                // 또는 더보기 메뉴에서 찾기
-                if (!transcriptBtn) {
-                  const moreActionsBtn = document.querySelector(
-                    "#button-shape button, yt-button-shape button"
-                  ) as HTMLElement
-                  if (moreActionsBtn) {
-                    moreActionsBtn.click()
-                    await new Promise((r) => setTimeout(r, 300))
-
-                    const menuItems = document.querySelectorAll(
-                      "ytd-menu-service-item-renderer, tp-yt-paper-item"
-                    )
-                    for (const item of menuItems) {
-                      const text = item.textContent?.toLowerCase() || ""
-                      if (
-                        text.includes("transcript") ||
-                        text.includes("스크립트") ||
-                        text.includes("자막")
-                      ) {
-                        transcriptBtn = item as HTMLElement
-                        break
-                      }
-                    }
-                  }
-                }
-
-                if (transcriptBtn) {
-                  console.log("[Memex] Found transcript button, clicking...")
-                  transcriptBtn.click()
-
-                  // 패널이 나타날 때까지 최대 5초 대기 (반복 체크)
-                  for (let i = 0; i < 10; i++) {
-                    await new Promise((r) => setTimeout(r, 500))
-                    transcriptPanel = document.querySelector("ytd-transcript-renderer")
-                    if (transcriptPanel) {
-                      console.log("[Memex] Transcript panel appeared after", (i + 1) * 500, "ms")
-                      break
-                    }
-                    // engagement panel에서도 찾기
-                    const panels = document.querySelectorAll("ytd-engagement-panel-section-list-renderer")
-                    for (const panel of panels) {
-                      if (panel.querySelector("ytd-transcript-renderer")) {
-                        transcriptPanel = panel.querySelector("ytd-transcript-renderer")
-                        break
-                      }
-                    }
-                    if (transcriptPanel) break
-                  }
-                }
-
-                if (!transcriptPanel) {
-                  transcriptPanel = document.querySelector("ytd-transcript-renderer")
-                }
-              }
-
-              // 방법 3: engagement panel에서 찾기
-              if (!transcriptPanel) {
-                const engagementPanels = document.querySelectorAll("ytd-engagement-panel-section-list-renderer")
-                for (const panel of engagementPanels) {
-                  if (panel.querySelector("ytd-transcript-renderer")) {
-                    transcriptPanel = panel.querySelector("ytd-transcript-renderer")
-                    break
-                  }
-                }
-              }
-
-              if (!transcriptPanel) {
-                console.log("[Memex] Transcript panel not found after retries, trying API fallback...")
-                // 대체 방법: ytInitialPlayerResponse에서 자막 URL 추출
-                // @ts-ignore
-                const playerResponse = window.ytInitialPlayerResponse
-                if (playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks) {
-                  const tracks = playerResponse.captions.playerCaptionsTracklistRenderer.captionTracks
-                  // 한국어 → 영어 → 첫 번째 자막 순으로 선택
-                  const track = tracks.find((t: any) => t.languageCode === 'ko') ||
-                               tracks.find((t: any) => t.languageCode === 'en') ||
-                               tracks[0]
-
-                  if (track?.baseUrl) {
-                    const details = playerResponse.videoDetails || {}
-                    console.log("[Memex] Found caption URL via API:", track.languageCode)
-                    ;(window as any)[resultKey] = {
-                      status: "caption_url",
-                      captionUrl: track.baseUrl,
-                      title: details.title || document.title,
-                      channelName: details.author || "",
-                      duration: parseInt(details.lengthSeconds) || 0,
-                      language: track.languageCode,
-                      kind: track.kind || "standard",
-                    }
-                    return
-                  }
-                }
-
-                // 자막 URL도 없으면 실패
-                if (playerResponse?.videoDetails) {
-                  const details = playerResponse.videoDetails
-                  ;(window as any)[resultKey] = {
-                    status: "no_transcript",
-                    title: details.title || document.title,
-                    channelName: details.author || "",
-                    duration: parseInt(details.lengthSeconds) || 0,
-                  }
-                  return
-                }
-                ;(window as any)[resultKey] = { status: "error", message: "자막 패널을 찾을 수 없습니다." }
-                return
-              }
-
-              console.log("[Memex] Found transcript panel, extracting segments...")
-
-              // 자막 세그먼트 추출
-              const segments: { text: string; start: number }[] = []
-              const segmentElements = transcriptPanel.querySelectorAll(
-                "ytd-transcript-segment-renderer"
-              )
-
-              for (const seg of segmentElements) {
-                const timeEl = seg.querySelector(
-                  ".segment-timestamp, [class*='timestamp']"
-                )
-                const textEl = seg.querySelector(
-                  ".segment-text, yt-formatted-string, [class*='text']"
-                )
-
-                if (textEl) {
-                  const text = textEl.textContent?.trim() || ""
-                  let startSeconds = 0
-
-                  if (timeEl) {
-                    const timeText = timeEl.textContent?.trim() || "0:00"
-                    const parts = timeText.split(":").map(Number)
-                    if (parts.length === 2) {
-                      startSeconds = parts[0] * 60 + parts[1]
-                    } else if (parts.length === 3) {
-                      startSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-                    }
-                  }
-
-                  if (text) {
-                    segments.push({ text, start: startSeconds })
-                  }
-                }
-              }
-
-              console.log("[Memex] Extracted segments:", segments.length)
-
-              // 영상 정보
-              // @ts-ignore
-              const playerResponse = window.ytInitialPlayerResponse
-              const videoDetails = playerResponse?.videoDetails || {}
-
-              if (segments.length > 0) {
-                ;(window as any)[resultKey] = {
-                  status: "success",
-                  segments,
-                  title: videoDetails.title || document.title,
-                  channelName: videoDetails.author || "",
-                  duration: parseInt(videoDetails.lengthSeconds) || 0,
-                }
-              } else {
-                ;(window as any)[resultKey] = {
-                  status: "error",
-                  message: "자막 세그먼트를 추출할 수 없습니다.",
-                }
-              }
-            } catch (e) {
-              console.error("[Memex] Extraction error:", e)
-              ;(window as any)[resultKey] = { status: "error", message: String(e) }
-            }
-          }
-
-          extractTranscript()
-        },
-      })
-
-      // 결과 폴링 (최대 15초)
-      console.log("[YouTube] Polling for transcript extraction...")
-      let extractResult: any = null
-      const maxWait = 15000
-      const pollInterval = 500
-      let waited = 0
-
-      while (waited < maxWait) {
-        await new Promise((r) => setTimeout(r, pollInterval))
-        waited += pollInterval
-
-        try {
-          const pollResults = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            world: "MAIN",
-            args: [extractResultKey],
-            func: (key: string) => {
-              const result = (window as any)[key]
-              if (result && result.status !== "pending") {
-                delete (window as any)[key]
-                return result
-              }
-              return null
-            },
-          })
-
-          extractResult = pollResults[0]?.result
-          if (extractResult) {
-            console.log("[YouTube] Extraction result:", extractResult.status)
-            break
-          }
-        } catch (e) {
-          console.error("[YouTube] Poll error:", e)
-        }
-      }
-
-      if (!extractResult || extractResult.status === "error") {
-        throw new Error(extractResult?.message || "자막을 추출할 수 없습니다.")
-      }
-
-      if (extractResult.status === "no_transcript") {
-        throw new Error("이 영상에는 자막이 없거나, 자막 패널을 열 수 없습니다.\n\n영상에서 직접 자막 아이콘(CC)을 확인해주세요.")
-      }
-
-      let segments: { text: string; start: number }[] = []
-      let captionInfo = {
-        title: extractResult.title,
-        channelName: extractResult.channelName,
-        duration: extractResult.duration,
-        language: "ko",
-        kind: undefined as string | undefined,
-      }
-
-      // caption_url 상태: Background에서 자막 fetch
-      if (extractResult.status === "caption_url") {
-        console.log("[YouTube] Fetching caption from URL via background...")
+      if (analysis) {
+        const durationMin = Math.ceil(analysis.duration / 60)
+        // 최종 결과 표시
         setMessages((prev) => {
           const updated = [...prev]
           updated[updated.length - 1] = {
             role: "ai",
-            text: `🎬 **YouTube 영상 분석 중...**\n\n1️⃣ 자막 URL 발견 ✓\n2️⃣ 자막 다운로드 중...`,
+            text: `🎬 **"${analysis.title}"**\n📺 ${analysis.channelName} • ${durationMin}분\n\n${analysis.summary}\n\n---\n💡 타임스탬프(예: 03:45)를 복사해서 YouTube에서 검색하면 해당 시점으로 이동합니다.`,
           }
           return updated
         })
-
-        // Background script로 fetch 요청
-        const captionResponse = await chrome.runtime.sendMessage({
-          type: "FETCH_CAPTION",
-          url: extractResult.captionUrl,
-        })
-
-        if (!captionResponse?.success || !captionResponse.data) {
-          throw new Error("자막 데이터를 가져올 수 없습니다.")
-        }
-
-        // 자막 XML 파싱
-        const captionData = captionResponse.data
-        const parsedSegments = parseTranscriptXml(captionData)
-
-        if (parsedSegments.length === 0) {
-          throw new Error("자막을 파싱할 수 없습니다.")
-        }
-
-        segments = parsedSegments.map(s => ({ text: s.text, start: s.start }))
-        captionInfo = {
-          title: extractResult.title,
-          channelName: extractResult.channelName,
-          duration: extractResult.duration,
-          language: extractResult.language || "ko",
-          kind: extractResult.kind,
-        }
-
-        console.log("[YouTube] Parsed", segments.length, "segments from API")
-      } else {
-        // DOM에서 추출된 segments
-        segments = extractResult.segments as { text: string; start: number }[]
       }
-
-      // 메시지 업데이트
-      setMessages((prev) => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: "ai",
-          text: `🎬 **YouTube 영상 분석 중...**\n\n1️⃣ 자막 추출 ✓\n2️⃣ 자막 다운로드 ✓ (${segments.length}개 세그먼트)\n3️⃣ AI 요약 생성 중...`,
-        }
-        return updated
-      })
-
-      // TranscriptSegment 형식으로 변환
-      const transcriptSegments = segments.map((s) => ({
-        text: s.text,
-        start: s.start,
-        duration: 0,
-      }))
-
-      setVideoTranscript(transcriptSegments)
-
-      // 요약용 데이터 준비
-      const captionDataResult = {
-        title: captionInfo.title,
-        channelName: captionInfo.channelName,
-        duration: captionInfo.duration,
-        language: captionInfo.language,
-        kind: captionInfo.kind,
-        segments: transcriptSegments,
-      }
-
-      // 3. 자막을 청크로 분할하여 요약 생성
-      const totalText = transcriptSegments.map((s) => s.text).join(" ")
-      const durationMin = Math.ceil((captionDataResult.duration || 0) / 60)
-
-      // 짧은 영상 (10분 이하)은 전체 요약, 긴 영상은 타임스탬프별 요약
-      let summaryPrompt: string
-
-      if (totalText.length < 4000) {
-        // 짧은 영상: 전체 요약
-        summaryPrompt = `다음 YouTube 영상 자막을 분석하여 요약해줘.
-
-**영상 제목:** ${captionDataResult.title}
-**채널:** ${captionDataResult.channelName}
-**길이:** ${durationMin}분
-
-**자막 내용:**
-${transcriptSegments.map((s) => `[${formatTimestamp(s.start)}] ${s.text}`).join("\n")}
-
----
-
-다음 형식으로 답변해줘:
-
-## 📺 영상 요약
-
-### 핵심 내용 (3줄)
-1.
-2.
-3.
-
-### 주요 타임스탬프
-- [MM:SS] 주요 내용 설명
-- [MM:SS] 주요 내용 설명
-- [MM:SS] 주요 내용 설명
-
-### 한 줄 결론
-`
-      } else {
-        // 긴 영상: 청크별 핵심만
-        const chunks = prepareTranscriptForSummary(transcriptSegments, 3000)
-        const firstChunk = chunks[0]?.text || totalText.slice(0, 3000)
-
-        summaryPrompt = `다음 YouTube 영상의 첫 부분 자막을 분석하여 요약해줘.
-
-**영상 제목:** ${captionDataResult.title}
-**채널:** ${captionDataResult.channelName}
-**총 길이:** ${durationMin}분 (긴 영상이므로 앞부분만 분석)
-
-**자막 내용 (앞부분):**
-${firstChunk}
-
----
-
-다음 형식으로 답변해줘:
-
-## 📺 영상 요약
-
-### 핵심 내용 (3줄)
-1.
-2.
-3.
-
-### 주요 타임스탬프 (앞부분 기준)
-- [MM:SS] 주요 내용 설명
-
-### 영상 주제
-`
-      }
-
-      const summary = await generate(summaryPrompt)
-
-      // 분석 결과 저장 (기억하기용)
-      const currentUrl = (await chrome.tabs.query({ active: true, currentWindow: true }))[0]?.url || ""
-      setLastVideoAnalysis({
-        url: currentUrl,
-        title: captionDataResult.title,
-        channelName: captionDataResult.channelName,
-        summary: summary,
-        transcript: totalText.slice(0, 8000), // 최대 8000자
-      })
-
-      // 최종 결과 표시 (타임스탬프 클릭 가능하게)
-      setMessages((prev) => {
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          role: "ai",
-          text: `🎬 **"${captionDataResult.title}"**\n📺 ${captionDataResult.channelName} • ${durationMin}분\n\n${summary}\n\n---\n💡 타임스탬프(예: 03:45)를 복사해서 YouTube에서 검색하면 해당 시점으로 이동합니다.`,
-        }
-        return updated
-      })
     } catch (error) {
       console.error("YouTube analysis failed:", error)
       setMessages((prev) => {
@@ -1388,10 +930,24 @@ ${firstChunk}
         }
         return updated
       })
-    } finally {
-      setIsAnalyzingVideo(false)
     }
   }
+
+  // YouTube 프로그레스 업데이트 반영
+  useEffect(() => {
+    if (youtubeProgress && isAnalyzingVideo) {
+      setMessages((prev) => {
+        const updated = [...prev]
+        if (updated.length > 0 && updated[updated.length - 1].role === "ai") {
+          updated[updated.length - 1] = {
+            role: "ai",
+            text: `🎬 **YouTube 영상 분석 중...**\n\n${youtubeProgress}`,
+          }
+        }
+        return updated
+      })
+    }
+  }, [youtubeProgress, isAnalyzingVideo])
 
   // === PDF 문서 분석 ===
   const handleAnalyzePdf = async () => {
@@ -1496,28 +1052,6 @@ ${result.text.slice(0, 6000)}
       })
     } finally {
       setIsAnalyzingPdf(false)
-    }
-  }
-
-  // 타임스탬프 클릭 시 YouTube 영상 이동
-  const jumpToTimestamp = async (seconds: number) => {
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab.id || !isYouTubePage) return
-
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (time: number) => {
-          const video = document.querySelector("video") as HTMLVideoElement
-          if (video) {
-            video.currentTime = time
-            video.play()
-          }
-        },
-        args: [seconds],
-      })
-    } catch (error) {
-      console.error("Jump to timestamp failed:", error)
     }
   }
 
@@ -2009,8 +1543,8 @@ ${result.text.slice(0, 6000)}
 
         {/* Action Buttons Row */}
         <div className="flex gap-2">
-          {/* YouTube Analysis Button - 유튜브 페이지에서만 표시 */}
-          {isYouTubePage ? (
+          {/* YouTube Analysis Button - 유튜브 페이지에서만 표시 (현재 개선중으로 비활성화) */}
+          {ENABLE_YOUTUBE_ANALYSIS && isYouTubePage ? (
             <>
               <button
                 onClick={handleAnalyzeVideo}

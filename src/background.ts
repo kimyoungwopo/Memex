@@ -160,7 +160,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "FETCH_CAPTION") {
     console.log("[Background] Fetching caption URL:", message.url)
 
+    // Blob URL 체크: Background Script에서는 접근 불가
+    if (message.url.startsWith("blob:")) {
+      console.error("[Background] Cannot fetch blob URL from background script")
+      sendResponse({
+        success: false,
+        error: "Blob URL은 Background Script에서 접근할 수 없습니다. Content Script를 사용하세요.",
+      })
+      return false
+    }
+
     // YouTube 자막 fetch (Background에서는 CORS 제한 없음)
+    // URL 유효성 검사
+    try {
+      const urlObj = new URL(message.url)
+      console.log("[Background] Caption URL host:", urlObj.host)
+
+      // expire 파라미터 확인 (YouTube caption URL에 포함됨)
+      const expire = urlObj.searchParams.get("expire")
+      if (expire) {
+        const expireTime = parseInt(expire) * 1000
+        const now = Date.now()
+        if (expireTime < now) {
+          console.error("[Background] Caption URL expired:", new Date(expireTime).toISOString())
+          sendResponse({
+            success: false,
+            error: "HTTP 410 (Caption URL expired)",
+          })
+          return true
+        }
+        console.log("[Background] Caption URL expires:", new Date(expireTime).toISOString())
+      }
+    } catch (urlError) {
+      console.error("[Background] Invalid URL:", urlError)
+      sendResponse({ success: false, error: "Invalid caption URL" })
+      return true
+    }
+
     fetch(message.url, {
       headers: {
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -171,16 +207,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((res) => {
         console.log("[Background] Response status:", res.status, res.statusText)
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`)
+          throw new Error(`HTTP ${res.status} ${res.statusText}`)
         }
         return res.text()
       })
       .then((text) => {
-        console.log("[Background] Response length:", text.length, "Preview:", text.slice(0, 100))
+        console.log("[Background] Caption fetched, length:", text.length)
+        // 빈 응답 체크
+        if (!text || text.length < 10) {
+          console.error("[Background] Empty or invalid caption response, length:", text?.length || 0)
+          sendResponse({
+            success: false,
+            error: "자막 URL이 만료되었거나 영상에 자막이 없습니다. 페이지를 새로고침(F5) 후 다시 시도해주세요.",
+          })
+          return
+        }
         sendResponse({ success: true, data: text })
       })
       .catch((err) => {
-        console.error("[Background] Fetch error:", err)
+        console.error("[Background] Fetch error:", err.message)
         sendResponse({ success: false, error: err.message })
       })
     return true // 비동기 응답을 위해 true 반환

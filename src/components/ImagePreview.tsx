@@ -22,7 +22,7 @@ export function ImagePreview({ src, onRemove }: ImagePreviewProps) {
       <button
         onClick={onRemove}
         className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
-        title="이미지 제거"
+        aria-label="첨부된 이미지 제거"
       >
         <X className="w-4 h-4" />
       </button>
@@ -72,7 +72,7 @@ export async function resizeImage(
 
       const ctx = canvas.getContext("2d")
       if (!ctx) {
-        reject(new Error("Canvas context not available"))
+        reject(new Error("캔버스 컨텍스트를 사용할 수 없습니다"))
         return
       }
 
@@ -83,7 +83,7 @@ export async function resizeImage(
           if (blob) {
             resolve(blob)
           } else {
-            reject(new Error("Failed to create blob"))
+            reject(new Error("이미지 변환에 실패했습니다"))
           }
         },
         "image/jpeg",

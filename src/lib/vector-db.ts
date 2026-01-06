@@ -7,6 +7,15 @@
 
 import { create, insert, search, remove, save, load, type Orama } from "@orama/orama"
 import { EMBEDDING_DIMENSION } from "./embedding-client"
+import {
+  MAX_MEMORY_CONTENT_LENGTH,
+  MEMORY_QUERY_LIMIT,
+  BACKUP_EXPORT_LIMIT,
+  DEFAULT_SEARCH_THRESHOLD,
+  VECTOR_SEARCH_THRESHOLD,
+  VECTOR_SEARCH_WEIGHT,
+  KEYWORD_SEARCH_WEIGHT,
+} from "../constants"
 
 // DB 스키마 정의
 const schema = {
@@ -91,7 +100,7 @@ export async function addMemory(memory: {
     id,
     url: memory.url,
     title: memory.title,
-    content: memory.content.slice(0, 10000), // 최대 10KB
+    content: memory.content.slice(0, MAX_MEMORY_CONTENT_LENGTH),
     summary: memory.summary,
     tags: memory.tags || [],
     embedding: memory.embedding,
@@ -111,7 +120,7 @@ export async function addMemory(memory: {
 export async function searchMemories(
   queryEmbedding: number[],
   limit: number = 5,
-  threshold: number = 0.5
+  threshold: number = DEFAULT_SEARCH_THRESHOLD
 ): Promise<Array<{
   id: string
   url: string
@@ -172,7 +181,7 @@ export async function searchByKeyword(
 
   const allDocs = await search(database, {
     term: "",
-    limit: 1000,
+    limit: MEMORY_QUERY_LIMIT,
   })
 
   const containsResults = allDocs.hits
@@ -224,7 +233,7 @@ export async function hybridSearch(
 }>> {
   // 벡터 검색과 키워드 검색 병행
   const [vectorResults, keywordResults] = await Promise.all([
-    searchMemories(queryEmbedding, limit, 0.3),
+    searchMemories(queryEmbedding, limit, VECTOR_SEARCH_THRESHOLD),
     searchByKeyword(query, limit),
   ])
 
@@ -240,23 +249,23 @@ export async function hybridSearch(
     createdAt: number
   }>()
 
-  // 벡터 검색 결과 (가중치 0.7)
+  // 벡터 검색 결과 (가중치 적용)
   for (const result of vectorResults) {
     scoreMap.set(result.id, {
       ...result,
-      score: result.score * 0.7,
+      score: result.score * VECTOR_SEARCH_WEIGHT,
     })
   }
 
-  // 키워드 검색 결과 (가중치 0.3)
+  // 키워드 검색 결과 (가중치 적용)
   for (const result of keywordResults) {
     const existing = scoreMap.get(result.id)
     if (existing) {
-      existing.score += result.score * 0.3
+      existing.score += result.score * KEYWORD_SEARCH_WEIGHT
     } else {
       scoreMap.set(result.id, {
         ...result,
-        score: result.score * 0.3,
+        score: result.score * KEYWORD_SEARCH_WEIGHT,
       })
     }
   }
@@ -300,7 +309,7 @@ export async function getAllMemories(): Promise<Array<{
   // 빈 검색으로 모든 문서 조회
   const results = await search(database, {
     term: "",
-    limit: 1000,
+    limit: MEMORY_QUERY_LIMIT,
   })
 
   return results.hits
@@ -417,7 +426,7 @@ export async function exportMemories(): Promise<MemoryBackup> {
   // 모든 문서 조회 (임베딩 포함)
   const results = await search(database, {
     term: "",
-    limit: 10000,
+    limit: BACKUP_EXPORT_LIMIT,
     includeVectors: true,
   })
 
@@ -549,7 +558,7 @@ export async function getAllMemoriesWithEmbeddings(): Promise<Array<{
 
   const results = await search(database, {
     term: "",
-    limit: 10000,
+    limit: BACKUP_EXPORT_LIMIT,
     includeVectors: true,
   })
 

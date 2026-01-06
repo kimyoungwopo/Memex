@@ -104,6 +104,7 @@ export function MemoryPanel({
           </div>
           <button
             onClick={onClose}
+            aria-label="기억 패널 닫기"
             className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
           >
             <X className="w-5 h-5" />

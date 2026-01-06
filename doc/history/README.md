@@ -54,3 +54,4 @@
 | [지식 그래프 시각화](./2026-01-06-knowledge-graph.md) | ⭐⭐⭐⭐ | KnowledgeGraph.tsx, MemoryDashboard.tsx |
 | [스마트 온보딩 & 모델 관리자](./2026-01-06-model-manager.md) | ⭐⭐⭐⭐ | ModelManager.tsx, WelcomePage.tsx, hardware-check.ts |
 | [실시간 번역](./2026-01-06-translation.md) | ⭐⭐⭐ | TranslationPanel.tsx, translation.ts |
+| [YouTube 요약 리팩토링](./2026-01-06-youtube-refactoring.md) | ⭐⭐⭐⭐ | use-youtube.ts, sidepanel.tsx |

@@ -28,6 +28,7 @@ export async function getSelectedText(): Promise<string> {
 
 /**
  * 번역된 텍스트를 웹페이지의 선택 영역에 주입
+ * XSS 방지: innerHTML 대신 DOM API(createElement, textContent) 사용
  */
 export async function injectTranslatedText(translatedText: string): Promise<boolean> {
   try {
@@ -64,109 +65,156 @@ export async function injectTranslatedText(translatedText: string): Promise<bool
           return true
         }
 
-        // 일반 텍스트 영역: 툴팁으로 표시
-        const tooltip = document.createElement("div")
-        tooltip.id = "memex-translation-tooltip"
-        tooltip.innerHTML = `
-          <div style="
-            position: fixed;
-            z-index: 999999;
-            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
-            color: white;
-            padding: 16px 20px;
-            border-radius: 12px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
-            max-width: 400px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            font-size: 14px;
-            line-height: 1.6;
-            animation: memex-fade-in 0.2s ease-out;
-          ">
-            <div style="
-              display: flex;
-              align-items: center;
-              gap: 8px;
-              margin-bottom: 12px;
-              padding-bottom: 10px;
-              border-bottom: 1px solid rgba(255,255,255,0.2);
-            ">
-              <span style="font-size: 18px;">🌐</span>
-              <span style="font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.9;">번역 결과</span>
-            </div>
-            <div style="white-space: pre-wrap; word-break: break-word;">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <div style="
-              display: flex;
-              gap: 8px;
-              margin-top: 14px;
-            ">
-              <button id="memex-copy-btn" style="
-                flex: 1;
-                padding: 8px 12px;
-                background: rgba(255,255,255,0.15);
-                color: white;
-                border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 12px;
-                font-weight: 500;
-                transition: background 0.2s;
-              ">📋 복사</button>
-              <button id="memex-close-btn" style="
-                padding: 8px 12px;
-                background: rgba(255,255,255,0.1);
-                color: rgba(255,255,255,0.7);
-                border: none;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 12px;
-                transition: background 0.2s;
-              ">✕ 닫기</button>
-            </div>
-          </div>
-          <style>
+        // === XSS-Safe: DOM API로 툴팁 생성 ===
+
+        // 기존 툴팁 제거
+        document.getElementById("memex-translation-tooltip")?.remove()
+
+        // 스타일 주입 (한 번만)
+        if (!document.getElementById("memex-translation-style")) {
+          const style = document.createElement("style")
+          style.id = "memex-translation-style"
+          style.textContent = `
             @keyframes memex-fade-in {
               from { opacity: 0; transform: translateY(-10px); }
               to { opacity: 1; transform: translateY(0); }
             }
             #memex-copy-btn:hover { background: rgba(255,255,255,0.25) !important; }
             #memex-close-btn:hover { background: rgba(255,255,255,0.2) !important; color: white !important; }
-          </style>
-        `
+          `
+          document.head.appendChild(style)
+        }
+
+        // 컨테이너
+        const tooltip = document.createElement("div")
+        tooltip.id = "memex-translation-tooltip"
+
+        // 메인 카드
+        const card = document.createElement("div")
+        Object.assign(card.style, {
+          position: "fixed",
+          zIndex: "999999",
+          background: "linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)",
+          color: "white",
+          padding: "16px 20px",
+          borderRadius: "12px",
+          boxShadow: "0 20px 40px rgba(0,0,0,0.3)",
+          maxWidth: "400px",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          fontSize: "14px",
+          lineHeight: "1.6",
+          animation: "memex-fade-in 0.2s ease-out",
+        })
+
+        // 헤더
+        const header = document.createElement("div")
+        Object.assign(header.style, {
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          marginBottom: "12px",
+          paddingBottom: "10px",
+          borderBottom: "1px solid rgba(255,255,255,0.2)",
+        })
+
+        const icon = document.createElement("span")
+        icon.textContent = "🌐"
+        icon.style.fontSize = "18px"
+
+        const title = document.createElement("span")
+        title.textContent = "번역 결과"
+        Object.assign(title.style, {
+          fontWeight: "600",
+          fontSize: "12px",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+          opacity: "0.9",
+        })
+
+        header.appendChild(icon)
+        header.appendChild(title)
+
+        // 번역 결과 (textContent 사용으로 XSS 방지)
+        const content = document.createElement("div")
+        content.textContent = text  // ✅ 안전: textContent는 HTML을 파싱하지 않음
+        Object.assign(content.style, {
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+        })
+
+        // 버튼 컨테이너
+        const buttonContainer = document.createElement("div")
+        Object.assign(buttonContainer.style, {
+          display: "flex",
+          gap: "8px",
+          marginTop: "14px",
+        })
+
+        // 복사 버튼
+        const copyBtn = document.createElement("button")
+        copyBtn.id = "memex-copy-btn"
+        copyBtn.textContent = "📋 복사"
+        Object.assign(copyBtn.style, {
+          flex: "1",
+          padding: "8px 12px",
+          background: "rgba(255,255,255,0.15)",
+          color: "white",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "12px",
+          fontWeight: "500",
+          transition: "background 0.2s",
+        })
+
+        // 닫기 버튼
+        const closeBtn = document.createElement("button")
+        closeBtn.id = "memex-close-btn"
+        closeBtn.textContent = "✕ 닫기"
+        Object.assign(closeBtn.style, {
+          padding: "8px 12px",
+          background: "rgba(255,255,255,0.1)",
+          color: "rgba(255,255,255,0.7)",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+          fontSize: "12px",
+          transition: "background 0.2s",
+        })
+
+        buttonContainer.appendChild(copyBtn)
+        buttonContainer.appendChild(closeBtn)
+
+        // DOM 조립
+        card.appendChild(header)
+        card.appendChild(content)
+        card.appendChild(buttonContainer)
+        tooltip.appendChild(card)
 
         // 선택 영역 위치 계산
         const rect = range.getBoundingClientRect()
-        const tooltipContent = tooltip.firstElementChild as HTMLElement
-        if (tooltipContent) {
-          tooltipContent.style.left = `${Math.max(10, rect.left)}px`
-          tooltipContent.style.top = `${Math.max(10, rect.bottom + 10)}px`
-        }
-
-        // 기존 툴팁 제거
-        document.getElementById("memex-translation-tooltip")?.remove()
+        card.style.left = `${Math.max(10, rect.left)}px`
+        card.style.top = `${Math.max(10, rect.bottom + 10)}px`
 
         // 툴팁 추가
         document.body.appendChild(tooltip)
 
         // 복사 버튼 이벤트
-        document.getElementById("memex-copy-btn")?.addEventListener("click", () => {
+        copyBtn.addEventListener("click", () => {
           navigator.clipboard.writeText(text)
-          const btn = document.getElementById("memex-copy-btn")
-          if (btn) {
-            btn.textContent = "✓ 복사됨!"
-            setTimeout(() => { btn.textContent = "📋 복사" }, 1500)
-          }
+          copyBtn.textContent = "✓ 복사됨!"
+          setTimeout(() => { copyBtn.textContent = "📋 복사" }, 1500)
         })
 
         // 닫기 버튼 이벤트
-        document.getElementById("memex-close-btn")?.addEventListener("click", () => {
-          document.getElementById("memex-translation-tooltip")?.remove()
+        closeBtn.addEventListener("click", () => {
+          tooltip.remove()
         })
 
         // 외부 클릭 시 닫기
         setTimeout(() => {
           const closeOnClick = (e: MouseEvent) => {
-            const tooltip = document.getElementById("memex-translation-tooltip")
-            if (tooltip && !tooltip.contains(e.target as Node)) {
+            if (!tooltip.contains(e.target as Node)) {
               tooltip.remove()
               document.removeEventListener("click", closeOnClick)
             }
@@ -177,7 +225,7 @@ export async function injectTranslatedText(translatedText: string): Promise<bool
         // ESC 키로 닫기
         const closeOnEsc = (e: KeyboardEvent) => {
           if (e.key === "Escape") {
-            document.getElementById("memex-translation-tooltip")?.remove()
+            tooltip.remove()
             document.removeEventListener("keydown", closeOnEsc)
           }
         }
