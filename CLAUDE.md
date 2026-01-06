@@ -238,16 +238,16 @@ Chrome Browser (Local)
 
 | 카테고리 | 기술 |
 |----------|------|
-| Framework | Plasmo 0.85.0 |
+| Build | Vite 5.0 + @crxjs/vite-plugin |
 | UI | React 18.2.0 + Tailwind CSS 3.4.1 |
 | Icons | lucide-react |
 | AI | Chrome Built-in AI (Gemini Nano) - Prompt API |
 | Embeddings | @xenova/transformers (all-MiniLM-L6-v2) |
 | Vector DB | @orama/orama 2.0.0 (벡터 검색) |
+| Graph | react-force-graph-2d (d3-force 기반) |
 | Markdown | 커스텀 파서 (코드 블록, 인라인 마크다운) |
 | Code Highlight | react-syntax-highlighter (hljs + atomOneDark) |
 | PDF | pdfjs-dist (pdf.js) |
-| Graph | react-force-graph-2d (d3-force 기반) |
 | Utilities | clsx, tailwind-merge |
 
 ## Source Structure
